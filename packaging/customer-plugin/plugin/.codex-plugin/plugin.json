@@ -28,6 +28,8 @@
       "Show the available PixVerse Platform API capabilities.",
       "Prepare a PixVerse API video request as a dry run.",
       "Check a known PixVerse API job without resubmitting it."
-    ]
+    ],
+    "logo": "./.codex-plugin/branding/logo.png",
+    "composerIcon": "./.codex-plugin/branding/composer-icon.png"
   }
 }
