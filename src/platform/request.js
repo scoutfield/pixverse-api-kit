@@ -39,7 +39,7 @@ export async function buildPlatformRequest(operation, normalizedInput) {
 }
 
 function serializeJsonBody(operation, payload) {
-  if (!new Set(["audio.verify", "agent.music-mv", "video.upscale"]).has(operation.id)) {
+  if (!new Set(["audio.verify", "agent.music-mv", "video.fusion", "video.upscale"]).has(operation.id)) {
     return JSON.stringify(payload);
   }
   const wirePayload = { ...payload };
