@@ -38,7 +38,7 @@ Platform billable commands wait for a terminal result by default. To return imme
 
 `image_references` is accepted as a documented input alias and normalized to `img_references`. Do not send both fields. Lip sync requires recognizable vocals; audio verification does not authorize an automatic paid submission.
 
-Keep identifiers as decimal strings in payload files and artifacts. The request layer losslessly serializes every field an operation's API reference types as integer (for example `img_id`, `img_ids`, `template_id`, `source_video_id`, `video_media_id`, `audio_media_id`, `keyframe_id`, `restyle_id`, `agent_id`, and reference `img_id` values) as JSON number tokens, because the endpoints reject quoted identifiers with ErrCode 400013. Fields the reference types as string (`mask_id`, `mask_ids`, `lip_sync_tts_speaker_id`, `webhook_id`) stay quoted.
+Keep identifiers as decimal strings in payload files and artifacts. The request layer losslessly serializes every field an operation's API reference types as integer, plus fusion `video_references` IDs and `image.template` `img_ids`, which the schemas list as string but the live API only accepts as integers (for example `img_id`, `img_ids`, `template_id`, `source_video_id`, `video_media_id`, `audio_media_id`, `keyframe_id`, `restyle_id`, `agent_id`, and reference `img_id` values) as JSON number tokens, because the endpoints reject quoted identifiers with ErrCode 400013. Fields the reference types as string (`mask_id`, `mask_ids`, `lip_sync_tts_speaker_id`, `webhook_id`) stay quoted.
 
 ### Durable artifact meanings
 

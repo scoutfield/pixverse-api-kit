@@ -58,20 +58,27 @@ export async function buildPlatformRequest(operation, normalizedInput) {
 // Fields each operation's API reference types as integer. The validators keep
 // identifiers as decimal strings so 64-bit values stay exact; they are turned
 // back into JSON integers here. Fields typed as string (mask_id, mask_ids,
-// lip_sync_tts_speaker_id, webhook_id, fusion video_references, image.template
-// img_ids) are deliberately absent.
+// lip_sync_tts_speaker_id, webhook_id) are deliberately absent.
 const VIDEO_SOURCE_IDS = ["source_video_id", "video_media_id"];
 const INTEGER_ID_FIELDS = new Map(Object.entries({
   "audio.verify": ["audio_media_id"],
   "voice.create": ["audio_media_id"],
-  "image.template": ["template_id"],
+  // The schema types img_ids items as string, but the live API rejects quoted
+  // values (400013), matching the image template guide's integer examples.
+  "image.template": ["template_id", "img_ids[]"],
   "video.text": ["template_id"],
   "video.image": ["img_id", "template_id"],
   "video.template": ["img_id", "img_ids[]", "template_id"],
   "video.transition": ["first_frame_img", "last_frame_img"],
   "video.multi-transition": ["multi_transition[].img_id"],
   "video.lip-sync": [...VIDEO_SOURCE_IDS, "audio_media_id"],
-  "video.fusion": ["image_references[].img_id"],
+  // The fusion schema types video_references IDs as string, but the live API
+  // rejects quoted values (400013), matching the v6 video reference guide.
+  "video.fusion": [
+    "image_references[].img_id",
+    "video_references[].source_video_id",
+    "video_references[].video_media_id",
+  ],
   "video.avatar": ["img_id", "audio_media_id"],
   "video.restyle": [...VIDEO_SOURCE_IDS, "restyle_id"],
   "video.swap-mask": [...VIDEO_SOURCE_IDS, "keyframe_id"],
