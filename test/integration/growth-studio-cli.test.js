@@ -11,7 +11,7 @@ import { createRecordingFetch, jsonResponse } from "../helpers/recording-fetch.j
 test("canonical Growth Studio namespace is independent from Platform configuration", async () => {
   const output = captureOutput();
   const { calls, fetchImpl } = createRecordingFetch([
-    jsonResponse({ ErrCode: 0, Resp: { folders: [{ folder_id: "630251570268735431" }] } }),
+    jsonResponse('{"folders":[{"folder_id":630251570268735431,"name":"ACME"}],"request_id":"req-folders"}'),
   ]);
   const exitCode = await main(["growth-studio", "folders", "list"], {
     env: {
@@ -23,9 +23,14 @@ test("canonical Growth Studio namespace is independent from Platform configurati
   });
 
   assert.equal(exitCode, 0);
-  assert.deepEqual(JSON.parse(output.stdout()), { folders: [{ folder_id: "630251570268735431" }] });
+  assert.deepEqual(JSON.parse(output.stdout()), {
+    folders: [{ folder_id: "630251570268735431", name: "ACME" }],
+    request_id: "req-folders",
+  });
   assert.equal(output.stderr(), "");
   assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "GET");
+  assert.equal(new URL(calls[0].url).pathname, "/openapi/v1/folders");
   assert.equal(calls[0].headers.get("Authorization"), "Bearer mh_live_fixture");
   assert.equal(calls[0].headers.has("API-KEY"), false);
 });

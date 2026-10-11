@@ -1,5 +1,5 @@
 export async function resolveFolderForPayload(client, payload, options = {}) {
-  const explicitFolderId = options.folderId || payload.folder_id;
+  const explicitFolderId = options.folderId || payload?.video?.folder_id;
   if (explicitFolderId) {
     assertFolderId(explicitFolderId);
     return {
@@ -12,15 +12,22 @@ export async function resolveFolderForPayload(client, payload, options = {}) {
 
   if (!options.folderName && !options.autoFolder) return null;
 
-  const folderName = normalizeFolderName(options.folderName || inferFolderName(payload));
+  // An explicit --folder-name is sent exactly as the user typed it (trimmed) and
+  // matched exactly; normalization only applies to names inferred by --auto-folder.
+  const explicitName = Boolean(options.folderName);
+  const folderName = explicitName
+    ? String(options.folderName).trim()
+    : normalizeFolderName(inferFolderName(payload));
   if (!folderName) {
-    if (options.folderName) throw new Error("Folder name cannot be empty.");
+    if (explicitName) throw new Error("Folder name cannot be empty.");
     return null;
   }
 
   const listResult = await client.listFolders({ traceId: options.traceId && `${options.traceId}-folder-list` });
   const folders = Array.isArray(listResult.body?.folders) ? listResult.body.folders : [];
-  const existing = folders.find((folder) => folderNamesMatch(folder.name, folderName));
+  const existing = folders.find((folder) => (explicitName
+    ? typeof folder?.name === "string" && folder.name.trim() === folderName
+    : folderNamesMatch(folder?.name, folderName)));
   if (existing) {
     const folderId = readFolderId(existing);
     return {
@@ -45,8 +52,8 @@ export async function resolveFolderForPayload(client, payload, options = {}) {
 }
 
 export function inferFolderName(payload) {
-  const metadata = asRecord(payload.metadata);
-  const product = asRecord(payload.product);
+  const metadata = asRecord(payload?.metadata);
+  const product = asRecord(payload?.product);
 
   return firstNonEmpty([
     metadata.folder_name,

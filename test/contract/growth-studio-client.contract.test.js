@@ -9,42 +9,60 @@ import {
 } from "../../src/growth-studio/client.js";
 import { createRecordingFetch, describeRecordedBody, jsonResponse } from "../helpers/recording-fetch.js";
 
+const VIDEO = Object.freeze({
+  aspect_ratio: "9:16",
+  duration_seconds: 30,
+  resolution: "1080p",
+  language: "en-US",
+  voiceover: true,
+  captions: true,
+  background_music: true,
+  avatar: Object.freeze({ mode: "auto" }),
+});
+
+// describeRecordedBody parses losslessly into null-prototype records; compare as plain JSON.
+async function recordedJson(body) {
+  return JSON.parse(JSON.stringify(await describeRecordedBody(body), (_key, value) => (
+    typeof value === "bigint" ? value.toString() : value
+  )));
+}
+
 test("Growth Studio client uses bearer auth only and never sends Platform headers", async () => {
   const { calls, fetchImpl } = createRecordingFetch([
     jsonResponse({ video_id: "627410861853514292", status: "processing" }),
-    jsonResponse({ ErrCode: 0, Resp: { folders: [] } }),
-    jsonResponse({ ErrCode: 0, Resp: { folder_id: "630251570268735431" } }),
+    jsonResponse({ folders: [], request_id: "folder-list-request" }),
+    jsonResponse({ folder_id: "630251570268735431", request_id: "folder-create-request" }, { status: 201 }),
   ]);
   const client = new GrowthStudioClient({
     ["api" + "Key"]: "growth-fixture-key",
-    ["folderApi" + "Key"]: "folder-fixture-key",
     baseUrl: "https://growth.example.test",
     fetchImpl,
   });
 
   await client.createVideo({
     product: { source_url: "https://shop.example.test/item" },
-    video: { avatar: { mode: "auto" } },
+    video: { ...VIDEO, folder_id: "630251570268735431" },
   }, { traceId: "create-trace" });
   await client.listFolders({ traceId: "folder-trace" });
   await client.createFolder({ name: "ACME" }, { traceId: "create-folder-trace" });
 
   assert.equal(calls[0].headers.get("Authorization"), "Bearer growth-fixture-key");
-  assert.equal(calls[1].headers.get("Authorization"), "Bearer folder-fixture-key");
-  assert.equal(calls[2].headers.get("Authorization"), "Bearer folder-fixture-key");
+  assert.equal(calls[1].headers.get("Authorization"), "Bearer growth-fixture-key");
+  assert.equal(calls[2].headers.get("Authorization"), "Bearer growth-fixture-key");
   assert.equal(calls.every(({ headers }) => !headers.has("API-KEY")), true);
   assert.equal(calls.every(({ headers }) => headers.has("Ai-Trace-Id")), true);
   assert.deepEqual(calls.map(({ method }) => method), ["POST", "GET", "POST"]);
   assert.deepEqual(calls.map(({ url }) => new URL(url).pathname), [
     "/openapi/v1/videos",
-    "/marketing_hub/folder/list",
-    "/marketing_hub/folder/create",
+    "/openapi/v1/folders",
+    "/openapi/v1/folders",
   ]);
-  assert.deepEqual(await describeRecordedBody(calls[0].body), {
+  assert.deepEqual(await recordedJson(calls[0].body), {
     product: { source_url: "https://shop.example.test/item" },
-    video: { avatar: { mode: "auto" } },
+    video: { ...VIDEO, avatar: { mode: "auto" }, folder_id: "630251570268735431" },
   });
-  assert.deepEqual(await describeRecordedBody(calls[2].body), { name: "ACME" });
+  assert.equal(calls[1].body, undefined);
+  assert.deepEqual(await recordedJson(calls[2].body), { name: "ACME" });
 });
 
 test("Growth Studio client preserves string identifiers through create and poll", async () => {
@@ -61,7 +79,7 @@ test("Growth Studio client preserves string identifiers through create and poll"
 
   const created = await client.createVideo({
     product: { source_url: "https://shop.example.test/item" },
-    video: { avatar: { mode: "auto" } },
+    video: VIDEO,
   });
   const final = await client.pollVideo(created.body.video_id, { initialDelaySeconds: 0 });
 
@@ -106,7 +124,7 @@ test("Growth Studio PDP uses bearer auth and the exact PDP wire contract", async
   assert.equal(calls[0].headers.get("Authorization"), "Bearer growth-fixture-key");
   assert.equal(calls[0].headers.get("Ai-Trace-Id"), "pdp-create-fixture");
   assert.equal(calls[0].headers.has("API-KEY"), false);
-  assert.deepEqual(await describeRecordedBody(calls[0].body), {
+  assert.deepEqual(await recordedJson(calls[0].body), {
     product: {
       title: "Linen Summer Shirt",
       images: [{ url: "https://media.pixverse.ai/example/front.webp" }],
@@ -304,4 +322,60 @@ test("Growth Studio successful responses reject malformed JSON as a protocol err
       return true;
     },
   );
+});
+
+test("Growth Studio create sends folder_id inside video and the edit body unchanged", async () => {
+  const { calls, fetchImpl } = createRecordingFetch([
+    jsonResponse({ video_id: "627410861853514292", status: "processing" }, { status: 202 }),
+    jsonResponse({ video_id: "627410861853514292", edit: { status: "processing" } }, { status: 202 }),
+  ]);
+  const client = new GrowthStudioClient({
+    ["api" + "Key"]: "growth-fixture-key",
+    baseUrl: "https://growth.example.test",
+    fetchImpl,
+  });
+
+  await client.createVideo({
+    product: { source_url: "https://shop.example.test/item" },
+    video: { ...VIDEO, folder_id: "630251570268735431" },
+  });
+  await client.editVideo("627410861853514292", { clip_index: 2, instruction: "Make the expression more natural." });
+
+  const created = await recordedJson(calls[0].body);
+  assert.equal(created.folder_id, undefined);
+  assert.equal(created.video.folder_id, "630251570268735431");
+  assert.deepEqual(calls.map(({ method, url }) => `${method} ${new URL(url).pathname}`), [
+    "POST /openapi/v1/videos",
+    "POST /openapi/v1/videos/627410861853514292/edit",
+  ]);
+  assert.deepEqual(await recordedJson(calls[1].body), {
+    clip_index: 2,
+    instruction: "Make the expression more natural.",
+  });
+});
+
+test("Growth Studio read requests retry 429 and 503 while writes stay single-attempt", async () => {
+  const waits = [];
+  const { calls, fetchImpl } = createRecordingFetch([
+    jsonResponse({ error: { code: "RATE_LIMIT_EXCEEDED", message: "slow down", retryable: true } }, {
+      status: 429,
+      headers: { "retry-after": "30" },
+    }),
+    jsonResponse({ error: { code: "SERVICE_UNAVAILABLE", message: "later", retryable: true } }, { status: 503 }),
+    jsonResponse({ folders: [{ folder_id: "630251570268735431", name: "ACME" }] }),
+    jsonResponse({ error: { code: "SERVICE_UNAVAILABLE", message: "later", retryable: true } }, { status: 503 }),
+  ]);
+  const client = new GrowthStudioClient({
+    ["api" + "Key"]: "growth-fixture-key",
+    baseUrl: "https://growth.example.test",
+    fetchImpl,
+    sleep: async (ms) => waits.push(ms),
+  });
+
+  const folders = await client.listFolders();
+  await assert.rejects(client.createFolder({ name: "ACME" }), (error) => error.status === 503);
+
+  assert.equal(folders.body.folders[0].folder_id, "630251570268735431");
+  assert.deepEqual(calls.map(({ method }) => method), ["GET", "GET", "GET", "POST"]);
+  assert.deepEqual(waits, [30_000, 2_000]);
 });

@@ -21,13 +21,20 @@ export function validateVideoOperation(operation, payload) {
       validateModelScalars(operation, payload);
       requireFields(operation, payload, ["duration", "img_id", "model", "prompt", "quality"]);
       break;
-    case "video.template":
-      validateModelScalars(operation, payload, { promptMaxLength: 2048 });
-      requireFields(operation, payload, ["template_id", "duration", "model", "prompt", "quality"]);
+    case "video.template": {
+      // The template supplies the prompt: it may be empty and is ignored when template_id is set.
+      if (payload.prompt === undefined) payload.prompt = "";
+      if (typeof payload.prompt !== "string" || payload.prompt.length > 2048) {
+        throw validationError(operation, "prompt must be a string no longer than 2048 characters.");
+      }
+      const { prompt, ...scalars } = payload;
+      validateModelScalars(operation, scalars);
+      requireFields(operation, payload, ["template_id", "duration", "model", "quality"]);
       if (!isPresent(payload.img_id) && (!Array.isArray(payload.img_ids) || payload.img_ids.length === 0)) {
         throw validationError(operation, "img_id or img_ids image source is required.");
       }
       break;
+    }
     case "video.transition":
       validateModelScalars(operation, payload);
       requireFields(operation, payload, ["prompt", "model", "duration", "quality"]);
@@ -46,6 +53,10 @@ export function validateVideoOperation(operation, payload) {
       validateModelScalars(operation, payload);
       requireFields(operation, payload, ["img_id", "quality"]);
       validateAudioOrTts(operation, payload, true);
+      if (isPresent(payload.lip_sync_tts_content)
+        && (payload.lip_sync_tts_content.length < 30 || payload.lip_sync_tts_content.length > 200)) {
+        throw validationError(operation, "avatar lip_sync_tts_content must contain 30 to 200 characters.");
+      }
       break;
     default:
       throw validationError(operation, `No video validator exists for ${operation.id}.`);
@@ -53,8 +64,8 @@ export function validateVideoOperation(operation, payload) {
 }
 
 function validateTransition(operation, payload) {
-  requireField(operation, payload, ["first_frame_img", "first_frame_img_id", "first_frame_image_id", "first_frame_url"], "first frame");
-  requireField(operation, payload, ["last_frame_img", "last_frame_img_id", "last_frame_image_id", "last_frame_url"], "last frame");
+  // The API only reads first_frame_img/last_frame_img; aliases would be sent but ignored.
+  requireFields(operation, payload, ["first_frame_img", "last_frame_img"]);
 }
 
 function validateMultiTransition(operation, payload) {
@@ -72,13 +83,19 @@ function validateMultiTransition(operation, payload) {
       throw validationError(operation, `multi-transition item ${index + 1} must be an object.`);
     }
     requireField(operation, item, ["img_id"], `multi-transition item ${index + 1} img_id`);
-    if (index < items.length - 1 && !isPresent(item.duration)) {
+    const last = index === items.length - 1;
+    if (last) {
+      if (isPresent(item.duration) && item.duration !== 0) {
+        throw validationError(operation, "the last multi-transition item duration must be 0 or omitted.");
+      }
+      return;
+    }
+    if (!isPresent(item.duration)) {
       throw validationError(operation, "duration is required for every multi-transition item except the last item.");
     }
-    const minimumDuration = index === items.length - 1 ? 0 : 1;
-    if (isPresent(item.duration) && (!Number.isInteger(item.duration) || item.duration < minimumDuration)) {
-      const range = minimumDuration === 0 ? "a non-negative integer" : "a positive integer";
-      throw validationError(operation, `multi-transition item duration must be ${range}.`);
+    const maximumDuration = items.length >= 3 ? 5 : 8;
+    if (!Number.isInteger(item.duration) || item.duration < 1 || item.duration > maximumDuration) {
+      throw validationError(operation, `multi-transition item duration must be an integer from 1 to ${maximumDuration} when there are ${items.length} items.`);
     }
   });
 }
@@ -110,14 +127,25 @@ function validateFusion(operation, payload) {
     ? { aspectRatios: ["16:9", "4:3", "1:1", "3:4", "9:16", "2:3", "3:2", "21:9", "auto"] }
     : {};
   validateModelScalars(operation, scalarPayload, scalarOptions);
-  requireFields(operation, payload, ["image_references", "prompt", "model", "duration", "quality", "aspect_ratio"]);
+  // v6 omni requests may reference only videos (fusion v6 video reference guide).
+  requireFields(operation, payload, omniVideo
+    ? ["prompt", "model", "duration", "quality", "aspect_ratio"]
+    : ["image_references", "prompt", "model", "duration", "quality", "aspect_ratio"]);
   if (!["v4.5", "v5", "v5.5", "v5.6", "v6", "c1"].includes(payload.model)) {
     throw validationError(operation, "fusion model must be v4.5, v5, v5.5, v5.6, v6, or c1.");
   }
   validateFusionModelRules(operation, payload, omniVideo);
-  const references = payload.image_references;
-  if (!Array.isArray(references) || references.length === 0) {
+  if (omniVideo && payload.video_references.length > 2) {
+    throw validationError(operation, "fusion accepts at most two reference videos.");
+  }
+  const references = payload.image_references ?? (omniVideo ? [] : undefined);
+  if (!Array.isArray(references) || (references.length === 0 && !omniVideo)) {
     throw validationError(operation, "fusion requires one or more image references.");
+  }
+  for (const reference of references) {
+    if (reference?.type !== undefined && !["subject", "background"].includes(reference.type)) {
+      throw validationError(operation, "fusion image reference type must be subject or background.");
+    }
   }
   const maximum = payload.model === "v6" && payload.reference_mode === "omni" ? 10
     : ["v5.5", "v5.6", "v6", "c1"].includes(payload.model) ? 7 : 3;

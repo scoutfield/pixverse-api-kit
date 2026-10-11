@@ -5,29 +5,29 @@
     "quality": "720p",
     "img_references": [
       {
-        "img_url": "https://cdn.example.test/a.png"
+        "img_id": "883671823"
       }
     ],
     "video_references": [
       {
-        "video_url": "https://cdn.example.test/a.mp4"
+        "video_media_id": "416097137329803"
       }
     ]
   },
   "method": "POST",
   "path": "/openapi/v2/video/agent/generate",
   "body": {
-    "agent_id": "414562414124109",
+    "agent_id": 414562414124109,
     "prompt": "Recreate pacing.",
     "quality": "720p",
     "img_references": [
       {
-        "img_url": "https://cdn.example.test/a.png"
+        "img_id": 883671823
       }
     ],
     "video_references": [
       {
-        "video_url": "https://cdn.example.test/a.mp4"
+        "video_media_id": 416097137329803
       }
     ]
   }

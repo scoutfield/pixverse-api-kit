@@ -11,7 +11,11 @@ const ROOT = process.cwd();
 const PLATFORM_SKILL = path.join(ROOT, ".agents/skills/pixverse-platform-api/SKILL.md");
 const PLATFORM_OPERATION_REFERENCE = path.join(ROOT, ".agents/skills/pixverse-platform-api/references/operation-catalog.md");
 const ROUTER_SKILL = path.join(ROOT, ".agents/skills/pixverse-api/SKILL.md");
-const MUSIC_MV_DOCUMENTATION_URL = "https://aisphere.feishu.cn/wiki/L8pgwGoSwiDbQ8ksGIHcppcvnrc";
+// audio.verify has no public page yet; Music MV is documented as One-click VibeMV.
+const MUSIC_MV_DOCUMENTATION_URLS = {
+  "audio.verify": "https://aisphere.feishu.cn/wiki/L8pgwGoSwiDbQ8ksGIHcppcvnrc",
+  "agent.music-mv": "https://docs.platform.pixverse.ai/one-click-vibemv-44175576e0",
+};
 const MUSIC_MV_OPERATION_IDS = new Set(["audio.verify", "agent.music-mv"]);
 
 test("Platform catalog, validators, fixtures, and help cover the independent inventory", async () => {
@@ -33,7 +37,7 @@ test("Platform catalog, validators, fixtures, and help cover the independent inv
     const helpLine = help.split("\n").find((line) => line.includes(`pixverse-api platform ${operation.command.join(" ")}`));
     assert.equal(helpLine.includes("[--no-wait]"), operation.billing === "billable");
     if (MUSIC_MV_OPERATION_IDS.has(operation.id)) {
-      assert.equal(operation.documentationUrl, MUSIC_MV_DOCUMENTATION_URL);
+      assert.equal(operation.documentationUrl, MUSIC_MV_DOCUMENTATION_URLS[operation.id]);
     } else {
       assert.equal(new URL(operation.documentationUrl).hostname, "docs.platform.pixverse.ai");
     }

@@ -40,3 +40,19 @@ export function serializeError(error) {
 
   return redact(serialized);
 }
+
+// Classifies a failed *read-only* request (for example a status poll) as
+// transient: worth waiting and reading again. Never use this to decide whether
+// to resend a billable submission; those are never retried automatically.
+export function isTransientReadError(error) {
+  if (!error || typeof error !== "object") return false;
+  if (isAbortError(error) || isAbortError(error.cause)) return false;
+  if (error.category === "transport") return true;
+  const status = Number(error.status);
+  if (status === 429 || (Number.isInteger(status) && status >= 500 && status <= 599)) return true;
+  return error.category === "provider" && error.retryable === true;
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError" || error?.name === "TimeoutError";
+}

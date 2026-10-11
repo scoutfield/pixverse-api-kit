@@ -158,8 +158,6 @@ PIXVERSE_PLATFORM_BASE_URL=https://app-api.pixverse.ai
 
 PIXVERSE_GROWTH_API_KEY=mh_live_...
 PIXVERSE_GROWTH_BASE_URL=https://growth-api.pixverse.ai
-PIXVERSE_GROWTH_FOLDER_API_PREFIX=/marketing_hub
-PIXVERSE_GROWTH_FOLDER_API_KEY=...
 ```
 
 Keys stay server-side. Platform and Growth Studio credentials are separate and never fall back to each other.

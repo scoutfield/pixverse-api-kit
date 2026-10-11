@@ -51,9 +51,8 @@ test("flat modules preserve Growth Studio named exports", () => {
   assert.equal(flatHttp.parseResponse, growthClient.parseResponse);
 });
 
-test("Growth Studio config has a provider-specific name and preserves folder key override", () => {
+test("Growth Studio config has a provider-specific name and ignores removed folder key settings", () => {
   const apiKeyField = "api" + "Key";
-  const folderApiKeyField = "folderApi" + "Key";
   const config = growthConfig.getGrowthStudioConfig({
     PIXVERSE_GROWTH_API_KEY: "mh_" + "live_fixture_video",
     PIXVERSE_GROWTH_FOLDER_API_KEY: "mh_" + "live_fixture_folder",
@@ -64,8 +63,6 @@ test("Growth Studio config has a provider-specific name and preserves folder key
 
   assert.deepEqual(config, {
     [apiKeyField]: "mh_" + "live_fixture_video",
-    [folderApiKeyField]: "mh_" + "live_fixture_folder",
-    folderApiPrefix: "/openapi/v1/growth-studio",
     baseUrl: "https://growth.example.test",
   });
   assert.equal(growthConfig.getConfig, growthConfig.getGrowthStudioConfig);
@@ -179,7 +176,8 @@ test("namespaced jobs preserve artifacts and do not mutate payloads during folde
   const client = {
     async createVideo(received) {
       assert.notEqual(received, payload);
-      assert.equal(received.folder_id, "630251570268735431");
+      assert.equal(received.video.folder_id, "630251570268735431");
+      assert.equal(received.folder_id, undefined);
       return { body: { video_id: "627410861853514292", status: "processing" } };
     },
   };
@@ -190,7 +188,7 @@ test("namespaced jobs preserve artifacts and do not mutate payloads during folde
     poll: false,
   });
 
-  assert.equal(payload.folder_id, undefined);
+  assert.equal(payload.video.folder_id, undefined);
   assert.equal(result.video_id, "627410861853514292");
   assert.equal(result.folder_id, "630251570268735431");
   assert.deepEqual(
@@ -272,7 +270,7 @@ test("Growth Studio command adapter preserves read-only result shapes", async ()
   assert.equal(calls[0][0], "avatars");
   assert.equal(calls[1][0], "folders");
   assert.deepEqual(calls[2][1], {
-    limit: "20",
+    limit: 20,
     status: "succeeded",
     cursor: "next",
     traceId: calls[2][1].traceId,
@@ -377,9 +375,10 @@ test("Growth Studio command adapter preserves create, edit, upload, and job beha
   assert.equal(job.video_id, "627410861853514292");
   assert.ok(job.job_dir.startsWith(jobsDir));
   assert.deepEqual(calls.map(([name]) => name), ["upload", "create", "create", "edit", "create"]);
-  assert.equal(calls[1][1].folder_id, "630251570268735431");
-  assert.equal(calls[2][1].folder_id, undefined);
-  assert.equal(calls[4][1].folder_id, undefined);
+  assert.equal(calls[1][1].video.folder_id, "630251570268735431");
+  assert.equal(calls[1][1].folder_id, undefined);
+  assert.equal(calls[2][1].video.folder_id, undefined);
+  assert.equal(calls[4][1].video.folder_id, undefined);
 });
 
 test("Growth Studio folder ensure accepts explicit option form", async () => {
@@ -396,11 +395,45 @@ test("Growth Studio folder ensure accepts explicit option form", async () => {
     "folders",
     "ensure",
     "--folder-name",
-    "fixture-folder",
+    "Fixture Folder",
   ], { client });
 
   assert.equal(result.folderId, "630251570268735431");
   assert.equal(result.source, "existing-folder");
+});
+
+test("Growth Studio folder ensure sends the user-provided name without normalization", async () => {
+  const created = [];
+  const client = {
+    async listFolders() {
+      return { body: { folders: [{ folder_id: "630251570268735431", name: "Fixture Folder" }] } };
+    },
+    async createFolder(payload) {
+      created.push(payload);
+      return { body: { folder_id: "630251570268735432" } };
+    },
+  };
+
+  const result = await runGrowthStudioCommand(["folders", "ensure", "  fixture-folder  "], { client });
+
+  assert.deepEqual(created, [{ name: "fixture-folder" }]);
+  assert.equal(result.folderId, "630251570268735432");
+  assert.equal(result.folderName, "fixture-folder");
+  assert.equal(result.source, "created-folder");
+});
+
+test("Growth Studio video list rejects undocumented limits and statuses before client access", async () => {
+  let clientAccesses = 0;
+  const context = {
+    get client() {
+      clientAccesses += 1;
+      throw new Error("client must not be loaded for invalid list options");
+    },
+  };
+  await assert.rejects(runGrowthStudioCommand(["video", "list", "--limit", "0"], context), /--limit must be a safe integer from 1 through 100/);
+  await assert.rejects(runGrowthStudioCommand(["video", "list", "--limit", "101"], context), /--limit/);
+  await assert.rejects(runGrowthStudioCommand(["video", "list", "--limit", "2.5"], context), /--limit/);
+  assert.equal(clientAccesses, 0);
 });
 
 test("Growth Studio command adapter rejects incomplete commands without configuration", async () => {

@@ -7,7 +7,7 @@
   "method": "POST",
   "path": "/openapi/v2/video/agent/generate",
   "body": {
-    "agent_id": "419629433597950",
+    "agent_id": 419629433597950,
     "model": "pro",
     "product_url": "https://listing.example.test/home"
   }

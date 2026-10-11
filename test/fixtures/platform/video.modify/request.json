@@ -7,7 +7,7 @@
   "method": "POST",
   "path": "/openapi/v2/video/modify/generate",
   "body": {
-    "source_video_id": "1",
+    "source_video_id": 1,
     "prompt": "Change sky.",
     "quality": "720p"
   }

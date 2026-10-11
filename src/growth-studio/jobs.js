@@ -227,6 +227,8 @@ async function persistFailure(jobDir, error, traceId, options = {}) {
     ...(publicError.code === undefined ? {} : { code: publicError.code }),
     ...(publicError.retryable === undefined ? {} : { retryable: publicError.retryable }),
     ...(publicError.retry_after === undefined ? {} : { retry_after: publicError.retry_after }),
+    ...(publicError.request_id === undefined ? {} : { request_id: publicError.request_id }),
+    ...(publicError.details === undefined ? {} : { details: publicError.details }),
     trace_id: publicError.trace_id ?? traceId,
   }));
 }
@@ -277,9 +279,9 @@ function requireStringIdentifier(value, message) {
 }
 
 function withFolderId(payload, folderId) {
-  if (!folderId) return payload;
+  if (!folderId || payload?.video?.folder_id === folderId) return payload;
   return {
     ...payload,
-    folder_id: folderId,
+    video: { ...payload.video, folder_id: folderId },
   };
 }

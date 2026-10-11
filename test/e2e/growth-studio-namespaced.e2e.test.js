@@ -13,23 +13,33 @@ test("executable Growth Studio namespace resolves folders and completes create t
   const jobsDir = path.join(tempRoot, "jobs");
   await fs.writeFile(payloadPath, JSON.stringify({
     product: { source_url: "https://product.example.invalid/item" },
-    video: { avatar: { mode: "auto" } },
+    video: {
+      aspect_ratio: "9:16",
+      duration_seconds: 30,
+      resolution: "1080p",
+      language: "en-US",
+      voiceover: true,
+      captions: true,
+      background_music: true,
+      avatar: { mode: "auto" },
+    },
   }));
 
   const server = await createMockApiServer((request, response) => {
     assert.equal(request.headers.authorization, "Bearer mh_live_fixture");
     assert.equal(request.headers["api-key"], undefined);
 
-    if (request.method === "GET" && request.url === "/marketing_hub/folder/list") {
-      return sendJson(response, { ErrCode: 0, Resp: { folders: [] } });
+    if (request.method === "GET" && request.url === "/openapi/v1/folders") {
+      return sendJson(response, { folders: [{ folder_id: "630251570268735430", name: "acme" }], request_id: "req-list" });
     }
-    if (request.method === "POST" && request.url === "/marketing_hub/folder/create") {
+    if (request.method === "POST" && request.url === "/openapi/v1/folders") {
       assert.deepEqual(JSON.parse(request.body.toString()), { name: "ACME" });
-      return sendJson(response, { ErrCode: 0, Resp: { folder_id: "630251570268735431" } });
+      return sendJson(response, { folder_id: "630251570268735431", request_id: "req-create" }, 201);
     }
     if (request.method === "POST" && request.url === "/openapi/v1/videos") {
       const payload = JSON.parse(request.body.toString());
-      assert.equal(payload.folder_id, "630251570268735431");
+      assert.equal(payload.folder_id, undefined);
+      assert.equal(payload.video.folder_id, "630251570268735431");
       return sendJson(response, { video_id: "627410861853514292", status: "processing" });
     }
     if (request.method === "GET" && request.url === "/openapi/v1/videos/627410861853514292") {
@@ -74,8 +84,8 @@ test("executable Growth Studio namespace resolves folders and completes create t
   assert.equal(output.status, "succeeded");
   assert.equal(output.folder_id, "630251570268735431");
   assert.deepEqual(server.requests.map(({ method, url }) => `${method} ${url}`), [
-    "GET /marketing_hub/folder/list",
-    "POST /marketing_hub/folder/create",
+    "GET /openapi/v1/folders",
+    "POST /openapi/v1/folders",
     "POST /openapi/v1/videos",
     "GET /openapi/v1/videos/627410861853514292",
   ]);

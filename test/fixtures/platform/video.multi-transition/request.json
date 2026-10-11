@@ -19,11 +19,11 @@
     "quality": "720p",
     "multi_transition": [
       {
-        "img_id": "1",
+        "img_id": 1,
         "duration": 3
       },
       {
-        "img_id": "2"
+        "img_id": 2
       }
     ]
   }

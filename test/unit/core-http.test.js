@@ -179,3 +179,70 @@ test("requestHttp does not retry an AbortError raised during fetch", async () =>
   assert.equal(attempts, 1);
   assert.deepEqual(delays, []);
 });
+
+test("requestHttp gives each read-only retry attempt a fresh trace header", async () => {
+  const seen = [];
+  const traces = ["trace-2", "trace-3"];
+  let attempts = 0;
+  const result = await requestHttp({
+    url: "https://example.test/status",
+    headers: new Headers({ "Ai-trace-id": "trace-1", Accept: "application/json" }),
+    traceId: "trace-1",
+    nextTraceId: () => traces.shift(),
+    retry: { maxAttempts: 3, delayMs: 0 },
+    sleep: async () => {},
+    fetchImpl: async (_url, { headers }) => {
+      seen.push(headers.get("Ai-trace-id"));
+      assert.equal(headers.get("Accept"), "application/json");
+      attempts += 1;
+      return attempts < 3 ? new Response("busy", { status: 503 }) : new Response('{"ok":true}');
+    },
+  });
+  assert.deepEqual(seen, ["trace-1", "trace-2", "trace-3"]);
+  assert.equal(result.traceId, "trace-3");
+
+  // Plain-object headers are rewritten case-insensitively; failures report the attempt trace.
+  const objectSeen = [];
+  await assert.rejects(requestHttp({
+    url: "https://example.test/status",
+    headers: { "ai-trace-id": "first" },
+    traceId: "first",
+    nextTraceId: () => "second",
+    retry: { maxAttempts: 2, delayMs: 0 },
+    sleep: async () => {},
+    fetchImpl: async (_url, { headers }) => {
+      objectSeen.push(headers);
+      return new Response("busy", { status: 503 });
+    },
+  }), (error) => error.traceId === "second");
+  assert.deepEqual(objectSeen, [{ "ai-trace-id": "first" }, { "Ai-trace-id": "second" }]);
+});
+
+test("requestHttp keeps the supplied trace when no per-attempt factory is given and never retries POST", async () => {
+  const seen = [];
+  await requestHttp({
+    url: "https://example.test/status",
+    headers: new Headers({ "Ai-trace-id": "fixed" }),
+    traceId: "fixed",
+    retry: { maxAttempts: 2, delayMs: 0 },
+    sleep: async () => {},
+    fetchImpl: async (_url, { headers }) => {
+      seen.push(headers.get("Ai-trace-id"));
+      return seen.length === 1 ? new Response("busy", { status: 503 }) : new Response("{}");
+    },
+  });
+  assert.deepEqual(seen, ["fixed", "fixed"]);
+
+  let factoryCalls = 0;
+  let posts = 0;
+  await assert.rejects(requestHttp({
+    url: "https://example.test/generate",
+    method: "POST",
+    traceId: "billable",
+    nextTraceId: () => { factoryCalls += 1; return "other"; },
+    retry: { maxAttempts: 3 },
+    fetchImpl: async () => { posts += 1; return new Response("busy", { status: 503 }); },
+  }), (error) => error.traceId === "billable");
+  assert.equal(posts, 1);
+  assert.equal(factoryCalls, 0);
+});

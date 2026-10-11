@@ -1,14 +1,15 @@
 import { requireFields, validationError } from "./common.js";
 
-const AGENT_TYPES = new Set(["vibe_mv", "vibe_mv_v3_custom"]);
+// vibe_mv_v3 is the documented legacy workflow; vibe_mv_v3_custom is recommended.
+const AGENT_TYPES = new Set(["vibe_mv_v3_custom", "vibe_mv_v3"]);
 const ASPECT_RATIOS = new Set(["16:9", "9:16", "1:1", "4:3", "3:4"]);
 const QUALITIES = new Set(["720p", "1080p"]);
 const MUSIC_STYLES = new Set([
-  "pop", "rock", "hiphop", "r&b", "jazz", "reggae", "country", "folk",
+  "pop", "rock", "hip hop", "hiphop", "r&b", "jazz", "reggae", "country", "folk",
   "electronic", "classical", "soul", "funk", "metal", "ambient", "others",
 ]);
 const MV_STYLES = new Set([
-  "custom", "cinematic", "lo-fi", "dreamscape", "woolen felt", "candy", "vintage",
+  "custom", "cinematic", "lo-fi", "dreamscape", "woolen felt", "candy", "golden age",
   "voxel", "retro game", "claymation", "woodland tale", "impressionism", "decadence",
   "futuristic", "chromatic clash", "holiday",
 ]);
@@ -18,13 +19,14 @@ const UINT64_MAX = 18_446_744_073_709_551_615n;
 
 export function normalizeAndValidateMusicMv(operation, payload) {
   const normalized = normalizeImageReferenceAlias(operation, payload);
-  requireFields(operation, normalized, [
-    "mv_agent_type", "audio_media_id", "aspect_ratio", "quality",
-  ]);
+  requireFields(operation, normalized, ["mv_agent_type", "audio_media_id"]);
   validateExactEnum(operation, "mv_agent_type", normalized.mv_agent_type, AGENT_TYPES);
   validatePositiveDecimalId(operation, "audio_media_id", normalized.audio_media_id);
-  validateExactEnum(operation, "aspect_ratio", normalized.aspect_ratio, ASPECT_RATIOS);
-  validateExactEnum(operation, "quality", normalized.quality, QUALITIES);
+  // Both are optional; the API defaults to 16:9 and 720p.
+  if (normalized.aspect_ratio !== undefined) {
+    validateExactEnum(operation, "aspect_ratio", normalized.aspect_ratio, ASPECT_RATIOS);
+  }
+  if (normalized.quality !== undefined) validateExactEnum(operation, "quality", normalized.quality, QUALITIES);
   validateOptionalStyles(operation, normalized);
   validateReferences(operation, normalized);
   validateOptionalScalars(operation, normalized);
@@ -68,7 +70,11 @@ function validateReferences(operation, payload) {
     }
     for (const reference of references) validateReference(operation, reference);
   }
-  if (String(payload.mv_style).toLowerCase() === "custom") {
+  const customStyle = String(payload.mv_style).toLowerCase() === "custom";
+  if (!customStyle && (payload.style_img_references?.length ?? 0) > 0) {
+    throw validationError(operation, "style_img_references is supported only when mv_style is Custom.");
+  }
+  if (customStyle) {
     const count = (payload.img_references?.length ?? 0) + (payload.style_img_references?.length ?? 0);
     if (count === 0) throw validationError(operation, "Custom mv_style requires an image or style reference.");
   }

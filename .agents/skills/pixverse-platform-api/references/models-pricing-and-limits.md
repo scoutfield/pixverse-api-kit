@@ -49,4 +49,4 @@ Use `resource.templates`, `resource.tts-speakers`, and `resource.restyle-effects
 - [Rate limits](https://docs.platform.pixverse.ai/rate-limit-796040m0)
 - [Image upload](https://docs.platform.pixverse.ai/upload-image-13016631e0)
 - [Video and audio upload](https://docs.platform.pixverse.ai/upload-videoaudio-19094401e0)
-- [One-Click Music MV interface](https://aisphere.feishu.cn/wiki/L8pgwGoSwiDbQ8ksGIHcppcvnrc)
+- [One-click VibeMV](https://docs.platform.pixverse.ai/one-click-vibemv-44175576e0)

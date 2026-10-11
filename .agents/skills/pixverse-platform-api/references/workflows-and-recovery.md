@@ -38,14 +38,14 @@ Platform billable commands wait for a terminal result by default. To return imme
 
 `image_references` is accepted as a documented input alias and normalized to `img_references`. Do not send both fields. Lip sync requires recognizable vocals; audio verification does not authorize an automatic paid submission.
 
-Keep Music MV identifiers as decimal strings in payload files and artifacts. The request layer losslessly serializes the documented `uint64` fields (`audio_media_id` and reference `img_id` values) as JSON number tokens because the live verification and generation endpoints reject quoted identifiers.
+Keep identifiers as decimal strings in payload files and artifacts. The request layer losslessly serializes every field an operation's API reference types as integer (for example `img_id`, `img_ids`, `template_id`, `source_video_id`, `video_media_id`, `audio_media_id`, `keyframe_id`, `restyle_id`, `agent_id`, and reference `img_id` values) as JSON number tokens, because the endpoints reject quoted identifiers with ErrCode 400013. Fields the reference types as string (`mask_id`, `mask_ids`, `lip_sync_tts_speaker_id`, `webhook_id`) stay quoted.
 
 ### Durable artifact meanings
 
 - `request.json` is written before submission and records the provider, operation, redacted headers, original submission trace, and normalized input.
 - `create-response.json` preserves the redacted create response.
 - `video-id.json` or `image-id.json` preserves the known result ID as a string.
-- `polling.jsonl` appends each redacted status snapshot and status-request trace.
+- `polling.jsonl` appends each redacted status snapshot and status-request trace, plus a `poll_error` record for each transient status-read failure.
 - `final.json` preserves the original submission `trace_id`; `status_trace_id` identifies the latest status request.
 - `error.json` preserves safe failure classification and trace context without exposing secrets.
 
@@ -67,9 +67,13 @@ Keep Music MV identifiers as decimal strings in payload files and artifacts. The
 
 Poll a known ID at the documented cadence and honor provider retry guidance. Preserve the original submission trace separately from status-request traces.
 
+The default cadence is 5 seconds with a 30 minute wait per session; a timeout is resumable. Transient status-read failures (transport errors, HTTP 429/5xx, `ErrCode` `500069` high load or `500044` concurrency limit) do not fail the job: polling backs off, honors `Retry-After`, and continues until the overall timeout. Other read errors fail immediately. Every read-only retry uses a fresh `Ai-trace-id`. The billable submission is never retried automatically.
+
 ## Webhooks
 
 Use the [official webhook page](https://docs.platform.pixverse.ai/how-to-use-webhook-1905378m0) to confirm current supported operations and delivery behavior. Verify timestamp, nonce, Base64 HMAC-SHA256 signature, time window, and nonce replay state before parsing JSON or invoking delivery logic. Return plain `ok` only after verified successful handling; use HTTPS and idempotent delivery processing.
+
+PixVerse resends until it receives `ok` (8 retries over about 5 hours). The built-in handler therefore answers a verified duplicate (same nonce, or same payload `id` and `status` with a fresh nonce) with `200 ok` without invoking the delivery callback again, and answers `409` only while the first attempt is still in progress. `null` payload values are accepted (signed as `null`). The timestamp window defaults to 6 hours (`timestampToleranceSeconds`) so PixVerse's own late retries are not rejected if they reuse the original timestamp; nonce and `(id, status)` deduplication still block replays.
 
 ## Raw diagnostics
 

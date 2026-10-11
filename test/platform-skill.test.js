@@ -14,7 +14,11 @@ const REFERENCES = [
   "operation-catalog.md",
   "payload-examples.json",
 ];
-const MUSIC_MV_DOCUMENTATION_URL = "https://aisphere.feishu.cn/wiki/L8pgwGoSwiDbQ8ksGIHcppcvnrc";
+// audio.verify has no public page yet; Music MV is documented as One-click VibeMV.
+const MUSIC_MV_DOCUMENTATION_URLS = {
+  "audio.verify": "https://aisphere.feishu.cn/wiki/L8pgwGoSwiDbQ8ksGIHcppcvnrc",
+  "agent.music-mv": "https://docs.platform.pixverse.ai/one-click-vibemv-44175576e0",
+};
 const MUSIC_MV_OPERATION_IDS = new Set(["audio.verify", "agent.music-mv"]);
 
 async function readSkill(relativePath) {
@@ -100,7 +104,7 @@ test("operation reference is traceable to every executable catalog row", async (
     assert.notEqual(row.prerequisite, "");
     assert.equal(row.documentationUrl, operation.documentationUrl);
     if (MUSIC_MV_OPERATION_IDS.has(operation.id)) {
-      assert.equal(row.documentationUrl, MUSIC_MV_DOCUMENTATION_URL);
+      assert.equal(row.documentationUrl, MUSIC_MV_DOCUMENTATION_URLS[operation.id]);
     } else {
       assert.equal(new URL(row.documentationUrl).hostname, "docs.platform.pixverse.ai");
     }
@@ -156,7 +160,7 @@ test("model, pricing, and limit guidance is dated and linked to primary sources"
   assert.match(reference, /Verified against official docs: 2026-09-20/);
   assert.match(reference, /refresh|re-check|verify live/i);
   for (const page of officialPages) assert.ok(reference.includes(page), page);
-  assert.ok(reference.includes(MUSIC_MV_DOCUMENTATION_URL));
+  assert.ok(reference.includes(MUSIC_MV_DOCUMENTATION_URLS["agent.music-mv"]));
   assert.match(reference, /15 credits.*second/i);
   assert.match(reference, /22\.5 credits.*second/i);
   assert.match(reference, /10.*360 seconds/i);

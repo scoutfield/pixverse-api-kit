@@ -17,7 +17,11 @@ const successShapes = JSON.parse(fs.readFileSync(
   "utf8",
 ));
 
-const MUSIC_MV_DOCUMENTATION_URL = "https://aisphere.feishu.cn/wiki/L8pgwGoSwiDbQ8ksGIHcppcvnrc";
+// audio.verify has no public page yet; Music MV is documented as One-click VibeMV.
+const MUSIC_MV_DOCUMENTATION_URLS = {
+  "audio.verify": "https://aisphere.feishu.cn/wiki/L8pgwGoSwiDbQ8ksGIHcppcvnrc",
+  "agent.music-mv": "https://docs.platform.pixverse.ai/one-click-vibemv-44175576e0",
+};
 const MUSIC_MV_OPERATION_IDS = new Set(["audio.verify", "agent.music-mv"]);
 
 test("Platform catalog matches every independently recorded official operation", () => {
@@ -54,7 +58,7 @@ test("every operation links to its exact official documentation page", () => {
   const publicUrls = [];
   for (const operation of PLATFORM_OPERATIONS) {
     if (MUSIC_MV_OPERATION_IDS.has(operation.id)) {
-      assert.equal(operation.documentationUrl, MUSIC_MV_DOCUMENTATION_URL);
+      assert.equal(operation.documentationUrl, MUSIC_MV_DOCUMENTATION_URLS[operation.id]);
     } else {
       assert.equal(new URL(operation.documentationUrl).hostname, "docs.platform.pixverse.ai");
       publicUrls.push(operation.documentationUrl);

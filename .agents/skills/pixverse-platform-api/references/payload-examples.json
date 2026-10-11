@@ -200,7 +200,7 @@
     "description": "Generate synchronized sound for an existing video.",
     "input": {
       "source_video_id": "629000000000000005",
-      "prompt": "Gentle rain and distant thunder."
+      "sound_effect_content": "Gentle rain and distant thunder."
     }
   },
   "video.extend": {
@@ -258,7 +258,7 @@
           "img_id": "629000000000000001",
           "quality": "720p",
           "lip_sync_tts_speaker_id": "speaker-7",
-          "lip_sync_tts_content": "Here is the latest update."
+          "lip_sync_tts_content": "Here is the latest product update for this week."
         }
       }
     ]
@@ -271,12 +271,12 @@
       "quality": "720p",
       "img_references": [
         {
-          "img_url": "https://cdn.example.test/reference.png"
+          "img_id": "629000000000000002"
         }
       ],
       "video_references": [
         {
-          "video_url": "https://cdn.example.test/reference.mp4"
+          "video_media_id": "629000000000000005"
         }
       ]
     }

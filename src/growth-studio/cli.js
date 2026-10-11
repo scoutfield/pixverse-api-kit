@@ -291,7 +291,9 @@ function parseListOptions(args) {
   const options = {};
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === "--limit") options.limit = readOptionValue(args, ++index, arg);
+    if (arg === "--limit") {
+      options.limit = readSafeIntegerOption(args, ++index, arg, { minimum: 1, maximum: 100 });
+    }
     else if (arg === "--status") options.status = readOptionValue(args, ++index, arg);
     else if (arg === "--cursor") options.cursor = readOptionValue(args, ++index, arg);
     else throw new Error(`Unknown video list option: ${arg}`);
@@ -546,8 +548,8 @@ function readFiniteOption(args, index, optionName, constraints = {}) {
 }
 
 function withFolderId(payload, folderId) {
-  if (!folderId) return payload;
-  return { ...payload, folder_id: folderId };
+  if (!folderId || payload?.video?.folder_id === folderId) return payload;
+  return { ...payload, video: { ...payload.video, folder_id: folderId } };
 }
 
 function resolveContextPath(context, value) {

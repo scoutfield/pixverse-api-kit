@@ -82,12 +82,75 @@ test("resolveFolderForPayload creates a missing folder", async () => {
   assert.deepEqual(calls, ["list", ["create", { name: "REVOLVE" }]]);
 });
 
-test("resolveFolderForPayload keeps explicit folder ids as strings", async () => {
+test("resolveFolderForPayload keeps an explicit video.folder_id without listing or creating", async () => {
+  const client = {
+    async listFolders() {
+      throw new Error("listFolders should not be called");
+    },
+    async createFolder() {
+      throw new Error("createFolder should not be called");
+    },
+  };
+  const folder = await resolveFolderForPayload(client, {
+    product: { source_url: "https://www.revolve.com/item" },
+    video: { folder_id: "630251570268735431" },
+  }, { folderName: "Another Folder", autoFolder: true });
+
+  assert.equal(folder.folderId, "630251570268735431");
+  assert.equal(folder.source, "explicit-folder-id");
+  assert.equal(folder.folderCreated, false);
+});
+
+test("resolveFolderForPayload ignores a legacy top-level folder_id", async () => {
   const folder = await resolveFolderForPayload({}, {
     folder_id: "630251570268735431",
     product: { source_url: "https://www.revolve.com/item" },
   }, {});
 
-  assert.equal(folder.folderId, "630251570268735431");
-  assert.equal(folder.source, "explicit-folder-id");
+  assert.equal(folder, null);
+});
+
+test("resolveFolderForPayload sends an explicit folder name trimmed but otherwise unchanged", async () => {
+  const calls = [];
+  const client = {
+    async listFolders() {
+      calls.push("list");
+      return { body: { folders: [{ folder_id: "1", name: "SUMMER DROP" }, { folder_id: "2", name: "summer_drop" }] } };
+    },
+    async createFolder(payload) {
+      calls.push(["create", payload]);
+      return { body: { folder_id: "636771263750078906" } };
+    },
+  };
+
+  const folder = await resolveFolderForPayload(client, {}, { folderName: "  summer drop  " });
+
+  assert.deepEqual(calls, ["list", ["create", { name: "summer drop" }]]);
+  assert.deepEqual(folder, {
+    folderId: "636771263750078906",
+    folderName: "summer drop",
+    folderCreated: true,
+    source: "created-folder",
+  });
+});
+
+test("resolveFolderForPayload reuses an exact explicit folder name match", async () => {
+  const client = {
+    async listFolders() {
+      return { body: { folders: [{ folder_id: "1", name: "Summer DROP" }, { folder_id: "2", name: "summer_drop" }] } };
+    },
+    async createFolder() {
+      throw new Error("createFolder should not be called");
+    },
+  };
+
+  const folder = await resolveFolderForPayload(client, {}, { folderName: "summer_drop" });
+
+  assert.equal(folder.folderId, "2");
+  assert.equal(folder.folderName, "summer_drop");
+  assert.equal(folder.source, "existing-folder");
+});
+
+test("resolveFolderForPayload rejects a blank explicit folder name", async () => {
+  await assert.rejects(resolveFolderForPayload({}, {}, { folderName: "   " }), /Folder name cannot be empty/);
 });

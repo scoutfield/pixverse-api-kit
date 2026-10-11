@@ -43,3 +43,12 @@ test("parsePlatformEnvelope rejects malformed response bodies", () => {
     assert.throws(() => parsePlatformEnvelope(body), /Platform API response envelope/i);
   }
 });
+
+test("parsePlatformEnvelope marks documented transient ErrCodes retryable and others not", () => {
+  for (const [code, retryable] of [[500069, true], ["500069", true], [500044, true], [10005, false], [500063, false]]) {
+    assert.throws(
+      () => parsePlatformEnvelope({ ErrCode: code, ErrMsg: "x", Resp: null }, { retryAfter: 3 }),
+      (error) => error.retryable === retryable && error.retryAfter === 3,
+    );
+  }
+});

@@ -26,12 +26,7 @@ npm run cli -- growth-studio --help
 
 Growth Studio uses `PIXVERSE_GROWTH_API_KEY` and bearer authentication. It must not read `PIXVERSE_PLATFORM_API_KEY` or use Platform credits. Keep keys in `.env` or the server environment, never in a payload, command argument, artifact, or browser.
 
-Optional folder configuration for the existing URL-based workflow:
-
-```bash
-PIXVERSE_GROWTH_FOLDER_API_PREFIX=/marketing_hub
-PIXVERSE_GROWTH_FOLDER_API_KEY=...
-```
+Folders use the documented `GET`/`POST /openapi/v1/folders` endpoints with the same `PIXVERSE_GROWTH_API_KEY`; no separate folder credential exists. A folder is targeted with the string `video.folder_id` inside the create payload, never a top-level `folder_id`.
 
 A non-loopback custom origin must be HTTPS, explicitly enabled with `PIXVERSE_GROWTH_ALLOW_CUSTOM_BASE_URL=true`, and controlled by the operator.
 
@@ -84,8 +79,8 @@ For a local image, upload it first and place only the returned `https://media.pi
 Folder targeting applies only to the existing general workflow:
 
 - `--folder-id <folder_id>` uses a verified folder.
-- `--folder-name <name>` reuses a case-insensitive match or creates the folder.
-- `--auto-folder` infers a folder from supported general-payload fields.
+- `--folder-name <name>` reuses an exact (trimmed) name match or creates the folder with that name unchanged.
+- `--auto-folder` infers a normalized folder name from supported general-payload fields and reuses a case-insensitive match.
 
 Prefer `growth-studio run-job` over direct general-video creation when a durable artifact trail is needed. General-video creation has no dry-run mode.
 
