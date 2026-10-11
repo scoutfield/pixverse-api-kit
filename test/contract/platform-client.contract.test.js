@@ -242,6 +242,27 @@ test("Music MV uint64 identifiers stay strings internally but serialize as lossl
   assert.equal(mvRequest.body, '{"audio_media_id":425662507205761,"style_img_references":[{"img_id":164913711,"ref_name":"Style"}],"seed":42,"image_references":[{"img_id":164913710,"ref_name":"Character"}]}');
   assert.equal(mvInput.payload.img_references[0].img_id, "164913710");
 
+  // The fusion endpoint documents image_references[].img_id as an integer; string IDs are rejected (ErrCode 400013).
+  const fusionInput = deepFreeze({
+    payload: {
+      model: "v6",
+      image_references: [{ img_id: "892421142", ref_name: "front" }, { img_id: "892421144", ref_name: "side" }],
+      prompt: "@front @side walk.",
+      duration: 15,
+      quality: "1080p",
+      aspect_ratio: "9:16",
+      generate_audio_switch: true,
+    },
+    query: {},
+    pathParams: {},
+    files: {},
+  });
+  const fusionRequest = await buildPlatformRequest({
+    id: "video.fusion", method: "POST", path: "/fusion", bodyMode: "json",
+  }, fusionInput);
+  assert.equal(fusionRequest.body, '{"model":"v6","image_references":[{"img_id":892421142,"ref_name":"front"},{"img_id":892421144,"ref_name":"side"}],"prompt":"@front @side walk.","duration":15,"quality":"1080p","aspect_ratio":"9:16","generate_audio_switch":true}');
+  assert.equal(fusionInput.payload.image_references[0].img_id, "892421142");
+
   const unrelatedRequest = await buildPlatformRequest({
     id: "video.avatar", method: "POST", path: "/avatar", bodyMode: "json",
   }, {
