@@ -188,7 +188,7 @@ pixverse-api growth-studio video list [--limit 20] [--status succeeded] [--curso
 pixverse-api growth-studio video edit <video_id> <clip_index> <instruction>
 ```
 
-Folder options for creation are mutually exclusive targeting choices:
+Folders are optional. Without a folder option (and without `video.folder_id` in the payload) no `folder_id` is sent, nothing is listed or created, and the video is filed at the workspace root. Folder options for creation are mutually exclusive targeting choices:
 
 - `--folder-id <folder_id>` uses a verified existing folder.
 - `--folder-name <name>` reuses an exact (trimmed) name match or creates the folder with that name unchanged.
