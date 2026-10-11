@@ -5,7 +5,7 @@ import test from "node:test";
 
 import { PlatformClient } from "../../src/platform/client.js";
 import { resumePlatformJob, submitPlatformJob } from "../../src/platform/jobs.js";
-import { createMockApiServer } from "../helpers/mock-api-server.js";
+import { createMockApiServer, sendJson } from "../helpers/mock-api-server.js";
 import { createTempJobRoot, readJobArtifacts } from "../helpers/temp-job-dir.js";
 
 test("ambiguous agent acceptance is resumable without a second billable POST", async (t) => {
@@ -23,8 +23,8 @@ test("ambiguous agent acceptance is resumable without a second billable POST", a
     agent_id: "414562414124109",
     prompt: "Recreate pacing.",
     quality: "720p",
-    img_references: [{ img_url: "https://cdn.example.test/a.png" }],
-    video_references: [{ video_url: "https://cdn.example.test/a.mp4" }],
+    img_references: [{ img_id: "1" }],
+    video_references: [{ video_media_id: "2" }],
   }, { jobRoot: root, traceIdFactory: () => "11111111-1111-4111-8111-111111111111" }),
   (error) => error.category === "transport");
   const [jobName] = await fs.readdir(root);
@@ -91,4 +91,51 @@ test("unknown status is preserved until timeout with final and error artifacts",
   const recoveredArtifacts = await readJobArtifacts(path.join(root, jobName));
   assert.equal(recoveredArtifacts["final-timeout-1.json"].status, "unknown");
   assert.equal(recoveredArtifacts["final.json"].status, "succeeded");
+});
+
+test("over real HTTP, transient status failures keep polling with fresh traces and one billable POST", async (t) => {
+  const root = await createTempJobRoot(t);
+  const savedTrace = "11111111-1111-4111-8111-111111111111";
+  let statusReads = 0;
+  const server = await createMockApiServer((request, response) => {
+    if (request.method === "POST") {
+      sendJson(response, { ErrCode: 0, ErrMsg: "success", Resp: { video_id: 627410861853514292 } });
+      return;
+    }
+    statusReads += 1;
+    // Each status call exhausts the client's 3 in-call GET retries first.
+    if (statusReads <= 3) {
+      sendJson(response, { error: { message: "busy" } }, 503);
+      return;
+    }
+    if (statusReads === 4) {
+      sendJson(response, { ErrCode: 500069, ErrMsg: "System is currently experiencing high load.", Resp: null });
+      return;
+    }
+    sendJson(response, { ErrCode: 0, ErrMsg: "success", Resp: { id: 627410861853514292, status: 1, url: "https://cdn.example.test/v.mp4" } });
+  });
+  t.after(() => server.close());
+  const client = new PlatformClient({
+    apiKey: "test-key", baseUrl: server.baseUrl, fetchImpl: globalThis.fetch, sleep: async () => {},
+  });
+  const final = await submitPlatformJob(client, "video.text", {
+    prompt: "x", model: "v6", duration: 5, quality: "720p", aspect_ratio: "16:9",
+  }, { jobRoot: root, traceIdFactory: () => savedTrace, poll: true, sleep: async () => {} });
+
+  assert.equal(final.status, "succeeded");
+  const posts = server.requests.filter(({ method }) => method === "POST");
+  const reads = server.requests.filter(({ method }) => method === "GET");
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].headers["ai-trace-id"], savedTrace);
+  assert.equal(reads.length, 5);
+  const readTraces = reads.map(({ headers }) => headers["ai-trace-id"]);
+  assert.equal(new Set(readTraces).size, readTraces.length);
+  assert.equal(readTraces.includes(savedTrace), false);
+  assert.equal(final.trace_id, savedTrace);
+  assert.equal(final.status_trace_id, readTraces.at(-1));
+  const artifacts = await readJobArtifacts(final.job_dir);
+  assert.deepEqual(
+    artifacts["polling.jsonl"].filter(({ status }) => status === "poll_error").map(({ error }) => error.code ?? error.status),
+    [503, 500069],
+  );
 });

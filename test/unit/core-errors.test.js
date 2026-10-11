@@ -62,3 +62,20 @@ test("PixverseCliError also accepts a single options object", () => {
     code: "BAD_INPUT",
   });
 });
+
+test("isTransientReadError classifies transport, 429, 5xx, and retryable provider codes", async () => {
+  const { isTransientReadError, PixverseCliError } = await import("../../src/core/errors.js");
+  const make = (fields) => new PixverseCliError("x", fields);
+  assert.equal(isTransientReadError(make({ category: "transport" })), true);
+  assert.equal(isTransientReadError(make({ category: "http", status: 429 })), true);
+  assert.equal(isTransientReadError(make({ category: "http", status: 503 })), true);
+  assert.equal(isTransientReadError(make({ category: "provider", status: 500, retryable: false })), true);
+  assert.equal(isTransientReadError(make({ category: "response", status: 502 })), true);
+  assert.equal(isTransientReadError(make({ category: "provider", status: 200, code: 500069, retryable: true })), true);
+  assert.equal(isTransientReadError(make({ category: "provider", status: 200, code: 400017, retryable: false })), false);
+  assert.equal(isTransientReadError(make({ category: "http", status: 400 })), false);
+  assert.equal(isTransientReadError(make({ category: "response", status: 200 })), false);
+  const abort = new DOMException("aborted", "AbortError");
+  assert.equal(isTransientReadError(make({ category: "transport", cause: abort })), false);
+  assert.equal(isTransientReadError(undefined), false);
+});

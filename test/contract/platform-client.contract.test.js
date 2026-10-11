@@ -3,13 +3,14 @@ import fs from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+
 import {
   PlatformClient,
   normalizePlatformResponseIdentifiers,
 } from "../../src/platform/client.js";
 import { PLATFORM_OPERATIONS } from "../../src/platform/operations.js";
 import { buildPlatformRequest } from "../../src/platform/request.js";
-import { createRecordingFetch, describeRecordedBody, jsonResponse } from "../helpers/recording-fetch.js";
+import { createRecordingFetch, describeRecordedBody, jsonResponse, parseLosslessJson } from "../helpers/recording-fetch.js";
 
 const FIXTURES = new URL("../fixtures/platform/", import.meta.url);
 const TEST_CREDENTIAL = ["fixture", "credential"].join("-");
@@ -185,7 +186,7 @@ test("GET and HEAD read requests retry transient failures, while every non-read-
   assert.equal(writeRecorder.calls.length, 1);
 });
 
-test("request building preserves repeated query values and serializes local multipart files without a content type", async () => {
+test("request building preserves repeated query values and types local multipart files by extension", async () => {
   const queryRequest = await buildPlatformRequest({
     id: "fixture.query", method: "GET", path: "/items", bodyMode: "none",
   }, {
@@ -208,8 +209,19 @@ test("request building preserves repeated query values and serializes local mult
   assert.equal(multipartRequest.headers.has("Content-Type"), false);
   assert.deepEqual(await describeRecordedBody(multipartRequest.body), {
     metadata: '{"role":"cover"}',
-    image: { name: "tiny.png", size: 90, type: "" },
+    image: { name: "tiny.png", size: 90, type: "image/png" },
   });
+
+  // The template list documents template_ids as a single comma-separated string.
+  const templatesRequest = await buildPlatformRequest({
+    id: "resource.templates", method: "GET", path: "/templates", bodyMode: "none",
+  }, {
+    payload: { template_ids: ["402331965264704", "402331965264705"] },
+    query: {},
+    pathParams: {},
+    files: {},
+  });
+  assert.equal(templatesRequest.path, "/templates?template_ids=402331965264704%2C402331965264705");
 });
 
 test("Music MV uint64 identifiers stay strings internally but serialize as lossless JSON numbers", async () => {
@@ -263,15 +275,25 @@ test("Music MV uint64 identifiers stay strings internally but serialize as lossl
   assert.equal(fusionRequest.body, '{"model":"v6","image_references":[{"img_id":892421142,"ref_name":"front"},{"img_id":892421144,"ref_name":"side"}],"prompt":"@front @side walk.","duration":15,"quality":"1080p","aspect_ratio":"9:16","generate_audio_switch":true}');
   assert.equal(fusionInput.payload.image_references[0].img_id, "892421142");
 
-  const unrelatedRequest = await buildPlatformRequest({
-    id: "video.avatar", method: "POST", path: "/avatar", bodyMode: "json",
+  // Fields the reference types as string stay strings even next to integer IDs.
+  const modifyRequest = await buildPlatformRequest({
+    id: "video.modify", method: "POST", path: "/modify", bodyMode: "json",
   }, {
-    payload: { audio_media_id: "18446744073709551615" },
+    payload: { video_media_id: "18446744073709551615", mask_ids: ["7"], img_ids: ["8"], keyframe_id: "1" },
     query: {},
     pathParams: {},
     files: {},
   });
-  assert.equal(unrelatedRequest.body, '{"audio_media_id":"18446744073709551615"}');
+  assert.equal(modifyRequest.body, '{"video_media_id":18446744073709551615,"mask_ids":["7"],"img_ids":[8],"keyframe_id":1}');
+
+  await assert.rejects(buildPlatformRequest({
+    id: "video.image", method: "POST", path: "/img", bodyMode: "json",
+  }, {
+    payload: { img_id: "not-a-number" },
+    query: {},
+    pathParams: {},
+    files: {},
+  }), { code: "INVALID_PLATFORM_REQUEST", message: /img_id must be a non-negative integer ID/ });
 });
 
 test("upscale media IDs stay strings internally but serialize as lossless JSON numbers", async () => {
@@ -316,7 +338,7 @@ test("client and request boundaries reject malformed construction inputs", async
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 async function fixture(operationId, name) {
-  return JSON.parse(await fs.readFile(new URL(`${operationId}/${name}.json`, FIXTURES), "utf8"));
+  return parseLosslessJson(await fs.readFile(new URL(`${operationId}/${name}.json`, FIXTURES), "utf8"));
 }
 
 function deepFreeze(value) {

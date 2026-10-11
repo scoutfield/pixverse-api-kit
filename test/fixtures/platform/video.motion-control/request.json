@@ -7,8 +7,8 @@
   "method": "POST",
   "path": "/openapi/v2/video/mimic/generate",
   "body": {
-    "source_video_id": "1",
-    "img_id": "2",
+    "source_video_id": 1,
+    "img_id": 2,
     "quality": "720p"
   }
 }

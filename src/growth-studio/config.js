@@ -5,8 +5,6 @@ const OFFICIAL_GROWTH_ORIGIN = new URL(DEFAULT_BASE_URL).origin;
 const DOTENV_KEYS = new Set([
   "PIXVERSE_GROWTH_API_KEY",
   "PIXVERSE_GROWTH_BASE_URL",
-  "PIXVERSE_GROWTH_FOLDER_API_KEY",
-  "PIXVERSE_GROWTH_FOLDER_API_PREFIX",
   "PIXVERSE_GROWTH_ALLOW_CUSTOM_BASE_URL",
 ]);
 
@@ -31,8 +29,6 @@ export function loadDotEnv(path = ".env") {
 
 export function getGrowthStudioConfig(env = process.env) {
   const apiKey = env.PIXVERSE_GROWTH_API_KEY;
-  const folderApiKey = env.PIXVERSE_GROWTH_FOLDER_API_KEY || apiKey;
-  const folderApiPrefix = env.PIXVERSE_GROWTH_FOLDER_API_PREFIX;
   const baseUrl = normalizeBaseUrl(
     env.PIXVERSE_GROWTH_BASE_URL || DEFAULT_BASE_URL,
     env.PIXVERSE_GROWTH_ALLOW_CUSTOM_BASE_URL,
@@ -46,7 +42,7 @@ export function getGrowthStudioConfig(env = process.env) {
     throw new Error("PIXVERSE_GROWTH_API_KEY must be a production key starting with mh_live_.");
   }
 
-  return { apiKey, folderApiKey, folderApiPrefix, baseUrl };
+  return { apiKey, baseUrl };
 }
 
 export const getConfig = getGrowthStudioConfig;

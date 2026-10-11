@@ -6,7 +6,7 @@
   "method": "POST",
   "path": "/openapi/v2/video/mask/selection",
   "body": {
-    "source_video_id": "1",
-    "keyframe_id": "1"
+    "source_video_id": 1,
+    "keyframe_id": 1
   }
 }

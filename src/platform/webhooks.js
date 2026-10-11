@@ -13,8 +13,20 @@ const MAX_BODY_BYTES = 1_048_576;
 const MAX_SECRET_BYTES = 4_096;
 const MAX_NONCE_BYTES = 256;
 const MAX_TRACE_ID_BYTES = 256;
-const MAX_TIMESTAMP_SKEW_SECONDS = 300;
-const MAX_NONCES = 10_000;
+// PixVerse retries a failed delivery after 2s, 10s, 30s, 1m, 5m, 15m, 1h and
+// 4h (about 5h22m in total), and the docs do not say whether a retry is
+// re-signed with a fresh Webhook-Timestamp. A 300s window could therefore
+// reject PixVerse's own late retries and lose the result. The default accepts
+// the whole documented schedule plus margin. Widening the window is safe
+// because replays are still stopped by the nonce store (each nonce is held
+// for the full window) and by (payload id, status) event deduplication.
+export const DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = 6 * 60 * 60;
+const MAX_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = 7 * 24 * 60 * 60;
+// Clock skew allowed for timestamps in the future; deliveries are never
+// legitimately signed far ahead of the receiver's clock.
+const MAX_FUTURE_SKEW_SECONDS = 300;
+const MAX_NONCES = 100_000;
+const EVENT_KEY_PREFIX = "pixverse-webhook-event:";
 const DEFAULT_COMMIT_TIMEOUT_MS = 5_000;
 const MAX_COMMIT_TIMEOUT_MS = 60_000;
 const REQUIRED_HEADERS = new Map([
@@ -30,7 +42,12 @@ export function createMemoryNonceStore(options = {}) {
     for (const [storedNonce, entry] of entries) {
       if (entry.expiresAt < nowSeconds) entries.delete(storedNonce);
     }
-    if (entries.has(nonce)) return undefined;
+    const existing = entries.get(nonce);
+    // A committed key is an already-processed delivery: report a duplicate.
+    // An in-flight reservation must not be acknowledged, because the first
+    // attempt may still fail and release it; ask the sender to retry later.
+    if (existing?.state === "committed") return undefined;
+    if (existing) throw inProgressError();
     if (entries.size >= maxEntries) throw webhookError(
       "Webhook replay protection is temporarily unavailable.",
       "WEBHOOK_NONCE_STORE_FULL",
@@ -80,20 +97,21 @@ export async function verifyPlatformWebhook(options = {}) {
   if (!/^[0-9]{1,13}$/.test(timestamp)) {
     throw webhookError("Webhook authentication failed.", "WEBHOOK_TIMESTAMP_INVALID", 401);
   }
+  const toleranceSeconds = normalizeTimestampTolerance(options.timestampToleranceSeconds);
   const timestampSeconds = unixSeconds(Number(timestamp));
   const nowSeconds = unixSeconds(resolveNow(options.now));
-  if (Math.abs(nowSeconds - timestampSeconds) > MAX_TIMESTAMP_SKEW_SECONDS) {
+  const ageSeconds = nowSeconds - timestampSeconds;
+  if (ageSeconds > toleranceSeconds || -ageSeconds > Math.min(MAX_FUTURE_SKEW_SECONDS, toleranceSeconds)) {
     throw webhookError("Webhook authentication failed.", "WEBHOOK_TIMESTAMP_OUT_OF_RANGE", 401);
   }
 
   const payload = parsePlatformWebhook(rawBody);
-  const [insertionOrderQuery, sortedQuery] = canonicalWebhookQueries(payload);
-  const insertionExpected = signWebhookQuery(secret, timestamp, nonce, insertionOrderQuery);
-  const sortedExpected = signWebhookQuery(secret, timestamp, nonce, sortedQuery);
   const supplied = decodeSha256Signature(signature);
-  const matchesInsertionOrder = timingSafeEqual(insertionExpected, supplied);
-  const matchesSortedOrder = timingSafeEqual(sortedExpected, supplied);
-  if ((Number(matchesInsertionOrder) | Number(matchesSortedOrder)) === 0) {
+  let matched = 0;
+  for (const query of canonicalWebhookQueries(payload)) {
+    matched |= Number(timingSafeEqual(signWebhookQuery(secret, timestamp, nonce, query), supplied));
+  }
+  if (matched === 0) {
     throw webhookError("Webhook authentication failed.", "WEBHOOK_SIGNATURE_INVALID", 401);
   }
 
@@ -108,17 +126,30 @@ export async function verifyPlatformWebhook(options = {}) {
       500,
     );
   }
-  const reservation = typeof nonceStore.reserve === "function"
-    ? await nonceStore.reserve(nonce, timestampSeconds + MAX_TIMESTAMP_SKEW_SECONDS, nowSeconds)
-    : reserveSetLikeNonceStore(nonceStore, nonce);
-  if (!reservation) throw webhookError("Webhook delivery was already received.", "WEBHOOK_REPLAY", 409);
-  if (typeof reservation.commit !== "function" || typeof reservation.release !== "function") {
-    throw webhookError(
-      "Webhook replay protection returned an invalid reservation.",
-      "WEBHOOK_NONCE_STORE_INVALID",
-      500,
-    );
+  // The nonce must stay reserved for as long as its timestamp is acceptable.
+  const nonceReservation = await reserveKey(nonceStore, nonce, timestampSeconds + toleranceSeconds, nowSeconds);
+  if (!nonceReservation) {
+    throw duplicateError("Webhook delivery was already received.", "WEBHOOK_REPLAY");
   }
+
+  // PixVerse recommends idempotency by payload `id`. A redelivery can carry a
+  // fresh nonce, so also deduplicate on (id, status); a later status for the
+  // same id is a distinct event and still delivered.
+  const eventKey = webhookEventKey(payload);
+  let eventReservation;
+  if (eventKey !== undefined) {
+    try {
+      eventReservation = await reserveKey(nonceStore, eventKey, nowSeconds + toleranceSeconds, nowSeconds);
+    } catch (error) {
+      await safeRelease(nonceReservation);
+      throw error;
+    }
+    if (!eventReservation) {
+      await safeRelease(nonceReservation);
+      throw duplicateError("Webhook event was already processed.", "WEBHOOK_DUPLICATE_EVENT");
+    }
+  }
+  const reservations = eventReservation ? [nonceReservation, eventReservation] : [nonceReservation];
 
   return {
     timestamp,
@@ -126,9 +157,48 @@ export async function verifyPlatformWebhook(options = {}) {
     signature,
     traceId,
     payload,
-    commit: () => reservation.commit(),
-    release: () => reservation.release(),
+    commit: async () => {
+      const results = await Promise.all(reservations.map((reservation) => reservation.commit()));
+      return results.every((result) => result === true);
+    },
+    release: async () => {
+      const results = await Promise.all(reservations.map((reservation) => reservation.release()));
+      return results.every((result) => result === true);
+    },
   };
+}
+
+async function reserveKey(store, key, expiresAt, nowSeconds) {
+  const reservation = typeof store.reserve === "function"
+    ? await store.reserve(key, expiresAt, nowSeconds)
+    : reserveSetLikeNonceStore(store, key);
+  if (!reservation) return undefined;
+  if (typeof reservation.commit !== "function" || typeof reservation.release !== "function") {
+    throw webhookError(
+      "Webhook replay protection returned an invalid reservation.",
+      "WEBHOOK_NONCE_STORE_INVALID",
+      500,
+    );
+  }
+  return reservation;
+}
+
+async function safeRelease(reservation) {
+  try {
+    await reservation.release();
+  } catch {
+    // Never disclose store internals; the original outcome is reported.
+  }
+}
+
+function webhookEventKey(payload) {
+  const { id } = payload;
+  if (!((typeof id === "string" && id !== "") || (typeof id === "number" && Number.isFinite(id)))) {
+    return undefined;
+  }
+  const status = payload.status;
+  const statusPart = status === undefined || status === null || typeof status === "object" ? "" : String(status);
+  return `${EVENT_KEY_PREFIX}${JSON.stringify([String(id), statusPart])}`;
 }
 
 export function parsePlatformWebhook(rawBody) {
@@ -154,6 +224,7 @@ export function createPlatformWebhookHandler(options = {}) {
   }
   const nonceStore = options.nonceStore ?? createMemoryNonceStore();
   const commitTimeoutMs = normalizeCommitTimeout(options.commitTimeoutMs);
+  const timestampToleranceSeconds = normalizeTimestampTolerance(options.timestampToleranceSeconds);
 
   return async function platformWebhookHandler(request, response) {
     let verification;
@@ -170,6 +241,7 @@ export function createPlatformWebhookHandler(options = {}) {
         secret: options.secret,
         now: options.now,
         nonceStore,
+        timestampToleranceSeconds,
       });
       const context = {
         timestamp: verification.timestamp,
@@ -184,6 +256,14 @@ export function createPlatformWebhookHandler(options = {}) {
       response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
       response.end("ok");
     } catch (error) {
+      if (error?.duplicate === true && !response.headersSent) {
+        // A verified redelivery of an already-processed event. PixVerse keeps
+        // resending until it receives exact `ok`, so acknowledge it without
+        // invoking onDelivery again.
+        response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        response.end("ok");
+        return;
+      }
       if (verification && !commitStarted) {
         try {
           await verification.release();
@@ -308,20 +388,42 @@ function decodeSha256Signature(value) {
   return decoded;
 }
 
+// The official Node example serializes each value with String(value), so a
+// null (for example "url": null on a failure delivery) signs as "null". The Go
+// (`fmt %v` -> "<nil>") and Python (`str` -> "None") examples differ, so those
+// spellings are also accepted for null values; every candidate is still a full
+// HMAC comparison. Rejecting null would return non-ok and lose the delivery.
+const NULL_SPELLINGS = ["null", "<nil>", "None"];
+
 function canonicalWebhookQueries(payload) {
-  const entries = Object.entries(payload).map(([key, value]) => {
-    if (value === null || typeof value === "object") {
+  let hasNull = false;
+  for (const value of Object.values(payload)) {
+    if (value === null) hasNull = true;
+    else if (typeof value === "object") {
       throw webhookError(
         "Webhook payload contains a value unsupported by the documented signature format.",
         "WEBHOOK_PAYLOAD_UNSUPPORTED",
         400,
       );
     }
-    return [key, String(value)];
-  });
-  const insertionOrder = new URLSearchParams(entries).toString();
-  const sortedEntries = [...entries].sort(([left], [right]) => left.localeCompare(right));
-  return [insertionOrder, new URLSearchParams(sortedEntries).toString()];
+  }
+  const queries = [];
+  for (const nullSpelling of hasNull ? NULL_SPELLINGS : [NULL_SPELLINGS[0]]) {
+    const entries = Object.entries(payload).map(([key, value]) => [
+      key, value === null ? nullSpelling : String(value),
+    ]);
+    // Code-point (byte) order, matching Go url.Values.Encode and Java TreeMap
+    // for the documented keys; localeCompare is locale- and case-folding-aware.
+    const sortedEntries = [...entries].sort(([left], [right]) => compareCodePoints(left, right));
+    queries.push(new URLSearchParams(entries).toString(), new URLSearchParams(sortedEntries).toString());
+  }
+  return queries;
+}
+
+function compareCodePoints(left, right) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
 }
 
 function signWebhookQuery(secret, timestamp, nonce, query) {
@@ -330,19 +432,32 @@ function signWebhookQuery(secret, timestamp, nonce, query) {
     .digest();
 }
 
+const SET_LIKE_IN_FLIGHT = new WeakMap();
+
 function reserveSetLikeNonceStore(store, nonce) {
-  if (store.has(nonce)) return undefined;
+  let inFlight = SET_LIKE_IN_FLIGHT.get(store);
+  if (!inFlight) {
+    inFlight = new Set();
+    SET_LIKE_IN_FLIGHT.set(store, inFlight);
+  }
+  if (store.has(nonce)) {
+    if (inFlight.has(nonce)) throw inProgressError();
+    return undefined;
+  }
   store.add(nonce);
+  inFlight.add(nonce);
   let state = "reserved";
   return Object.freeze({
     commit() {
       if (state !== "reserved") return false;
       state = "committed";
+      inFlight.delete(nonce);
       return true;
     },
     release() {
       if (state !== "reserved") return false;
       state = "released";
+      inFlight.delete(nonce);
       return store.delete(nonce);
     },
   });
@@ -390,6 +505,18 @@ function positiveInteger(value, fallback) {
   return Number.isSafeInteger(value) && value > 0 ? value : fallback;
 }
 
+function normalizeTimestampTolerance(value) {
+  if (value === undefined) return DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS;
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS) {
+    throw webhookError(
+      "Invalid webhook timestamp tolerance.",
+      "WEBHOOK_CONFIGURATION_INVALID",
+      500,
+    );
+  }
+  return value;
+}
+
 function normalizeCommitTimeout(value) {
   if (value === undefined) return DEFAULT_COMMIT_TIMEOUT_MS;
   if (!Number.isSafeInteger(value) || value < 1 || value > MAX_COMMIT_TIMEOUT_MS) {
@@ -408,6 +535,21 @@ function toPlainJsonValue(value) {
     return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, toPlainJsonValue(entry)]));
   }
   return value;
+}
+
+function duplicateError(message, code) {
+  // statusCode 200: the correct reply to a verified duplicate is exact `ok`.
+  const error = webhookError(message, code, 200);
+  error.duplicate = true;
+  return error;
+}
+
+function inProgressError() {
+  return webhookError(
+    "Webhook delivery is already being processed.",
+    "WEBHOOK_DELIVERY_IN_PROGRESS",
+    409,
+  );
 }
 
 function webhookError(message, code, statusCode, cause) {

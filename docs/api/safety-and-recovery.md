@@ -33,6 +33,12 @@ pixverse-api growth-studio resume /absolute/path/jobs/<job-dir>
 pixverse-api growth-studio pdp resume /absolute/path/jobs/<job-dir>
 ```
 
+### Polling defaults and transient read errors
+
+Platform status polling defaults to a 5 second interval (the status page asks for no less than 5 seconds) and a 30 minute wait per session (`--interval-ms` / `--timeout-ms` override both). Generation can run longer than that; a timeout is not a failure and the job resumes from its directory.
+
+Status reads are read-only, so a transient read failure does not abandon the job. Transport errors, HTTP 429 and 5xx, and the retryable `ErrCode`s `500069` (high load) and `500044` (concurrency limit) keep the job polling with exponential backoff (starting at the interval, capped at 60 seconds), honoring `Retry-After` when present, until the overall timeout. Each such failure is appended to `polling.jsonl` as a `poll_error` record; a timeout reached during failures records the last error in the timeout details. Any other error (for example an invalid ID) still fails immediately. Each read-only HTTP retry sends a fresh `Ai-trace-id`, because PixVerse can return a cached earlier result for a reused trace. None of this applies to the billable submission: it is sent exactly once, never retried automatically, and keeps its saved trace for recovery.
+
 `resume` is poll-only. It reads the saved result ID and continues status checks; it never calls a create endpoint. If the submission response was ambiguous and no result ID was saved, it returns `reconciliation_required` instead of risking a duplicate charged generation. Inspect the saved request, error, recent remote jobs, and any provider request ID before deciding whether to submit again.
 
 ## Growth Studio PDP
@@ -53,10 +59,18 @@ See [Growth Studio PDP Videos](growth-studio-pdp.md) for its seller-neutral fash
 
 ## Webhooks
 
-Platform webhook verification first parses the raw body as a JSON object whose values must be scalar. It converts those key/value pairs to a URL-encoded query string with `URLSearchParams`, and verifies either insertion order or key-sorted order for compatibility. The signed string is:
+Platform webhook verification first parses the raw body as a JSON object whose values must be scalar or `null`. It converts those key/value pairs to a URL-encoded query string with `URLSearchParams`, and verifies either insertion order or key-sorted order (code-point/byte order, matching the official Go and Java examples) for compatibility. The signed string is:
 
 ```text
 ${timestamp}\n${nonce}\n${queryString}
 ```
 
-For example, `{"video_id":"123","status":1}` becomes `video_id=123&status=1`. Nested objects, arrays, and `null` are not supported by this signature format. The signature is Base64 HMAC-SHA256. The handler validates authentication and reserves the nonce before delivery, rejects replays, and returns exact body `ok` only after the delivery callback succeeds and the nonce reservation is committed.
+For example, `{"video_id":"123","status":1}` becomes `video_id=123&status=1`. A `null` value (such as `"url": null` on a failed delivery) is accepted and signed as `null`, which is what `String(null)` in the official Node example produces; the Go (`<nil>`) and Python (`None`) spellings are also accepted. Nested objects and arrays are not supported by this signature format and are rejected. The signature is Base64 HMAC-SHA256.
+
+The handler validates authentication, reserves the nonce, and returns exact body `ok` only after the delivery callback succeeds and the reservation is committed. PixVerse resends any delivery that does not receive `ok` (8 retries over about 5 hours), so duplicates are acknowledged rather than rejected:
+
+- A verified replay of an already-processed nonce returns `200 ok` without calling the delivery callback again.
+- Deliveries are also deduplicated by payload `(id, status)`, as the official docs recommend, so a redelivery with a fresh nonce is acknowledged with `ok` once the first one succeeded. A later status for the same `id` is a new event.
+- A duplicate that arrives while the first attempt is still being processed gets `409`, so PixVerse retries it later; if the first attempt fails, its reservation is released and the retry is delivered.
+
+`timestampToleranceSeconds` (an option of `createPlatformWebhookHandler` and `verifyPlatformWebhook`, 1 second to 7 days) bounds how old a `Webhook-Timestamp` may be. The default is 6 hours: the docs do not say whether retries are re-signed, and a short window could reject PixVerse's own late retries if they keep the original timestamp. Replays inside the window are still blocked by the nonce and `(id, status)` deduplication, which are held for the whole window. Timestamps more than 300 seconds in the future are always rejected. A custom store's `reserve(key, expiresAt, nowSeconds)` must return a falsy value only for a key that is already committed, and throw (for example an error with `statusCode: 409`) for one that is still reserved. For a multi-instance receiver, use a shared durable store.

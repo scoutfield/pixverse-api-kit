@@ -6,7 +6,7 @@
   "method": "POST",
   "path": "/openapi/v2/video/restyle/generate",
   "body": {
-    "source_video_id": "1",
-    "restyle_id": "2"
+    "source_video_id": 1,
+    "restyle_id": 2
   }
 }

@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
+import JSONBigFactory from "json-bigint";
 import {
   assertVideoId,
   validateCreatePayload,
   validateEditPayload,
   validateFolderPayload,
+  validateListVideosOptions,
 } from "./validation.js";
 import { PDP_CREATE_ROUTE, normalizePdpPayload } from "./pdp.js";
 import { normalizeWalletLedgerOptions } from "./wallet.js";
@@ -13,6 +15,7 @@ export {
   validateCreatePayload,
   validateEditPayload,
   validateFolderPayload,
+  validateListVideosOptions,
 } from "./validation.js";
 export {
   PDP_CREATE_PATH,
@@ -24,8 +27,24 @@ export {
 export { normalizeWalletLedgerOptions } from "./wallet.js";
 
 const API_PREFIX = "/openapi/v1";
-const DEFAULT_FOLDER_API_PREFIX = "/marketing_hub";
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "canceled"]);
+const DEFAULT_RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
+const JSON_BIG = JSONBigFactory({
+  storeAsString: true,
+  protoAction: "error",
+  constructorAction: "error",
+});
+const DEFAULT_READ_RETRY = Object.freeze({ maxAttempts: 4, baseDelayMs: 1_000, maxDelayMs: 30_000 });
+
+export const MIN_INITIAL_POLL_DELAY_SECONDS = 5;
+export const MIN_FALLBACK_POLL_DELAY_SECONDS = 1;
+export const MAX_UPLOAD_IMAGE_BYTES = 20 * 1024 * 1024;
+const UPLOAD_IMAGE_TYPES = Object.freeze({
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+});
 
 export class GrowthStudioApiError extends Error {
   constructor(message, options = {}) {
@@ -72,7 +91,7 @@ export async function parseResponse(response) {
   let body = {};
   if (text) {
     try {
-      body = JSON.parse(text);
+      body = toPlainJson(JSON_BIG.parse(text));
     } catch {
       if (response.ok) {
         throw new GrowthStudioApiError("PixVerse API returned invalid JSON in a successful response.", {
@@ -87,12 +106,14 @@ export async function parseResponse(response) {
   }
 
   if (!response.ok) {
-    const error = body.error || {};
+    const error = isRecord(body?.error) ? body.error : {};
     throw new GrowthStudioApiError(error.message || `PixVerse API request failed with HTTP ${response.status}.`, {
       status: response.status,
       code: error.code,
-      retryable: error.retryable,
-      requestId: body.request_id || requestId,
+      retryable: typeof error.retryable === "boolean"
+        ? error.retryable
+        : DEFAULT_RETRYABLE_STATUSES.has(response.status),
+      requestId: body?.request_id || requestId,
       retryAfter,
       details: error.details,
     });
@@ -101,7 +122,7 @@ export async function parseResponse(response) {
   return {
     body,
     headers: response.headers,
-    requestId: body.request_id || requestId,
+    requestId: body?.request_id || requestId,
     retryAfter,
   };
 }
@@ -109,19 +130,19 @@ export async function parseResponse(response) {
 export class GrowthStudioClient {
   constructor({
     apiKey,
-    folderApiKey,
-    folderApiPrefix = DEFAULT_FOLDER_API_PREFIX,
     baseUrl,
     fetchImpl = globalThis.fetch,
     sleep = defaultSleep,
+    now = Date.now,
+    readRetry = DEFAULT_READ_RETRY,
   }) {
     if (!fetchImpl) throw new Error("A fetch implementation is required.");
     this.apiKey = apiKey;
-    this.folderApiKey = folderApiKey || apiKey;
-    this.folderApiPrefix = normalizeApiPrefix(folderApiPrefix);
     this.baseUrl = baseUrl;
     this.fetch = fetchImpl;
     this.sleep = sleep;
+    this.now = now;
+    this.readRetry = { ...DEFAULT_READ_RETRY, ...readRetry };
   }
 
   async listAvatars(options = {}) {
@@ -129,7 +150,14 @@ export class GrowthStudioClient {
   }
 
   async uploadImage(filePath, options = {}) {
-    const file = await fs.openAsBlob(filePath);
+    const type = UPLOAD_IMAGE_TYPES[path.extname(String(filePath)).toLowerCase()];
+    if (!type) throw new Error("upload image accepts only .jpg, .jpeg, .png, or .webp files.");
+    const stats = await fs.promises.stat(filePath);
+    if (!stats.isFile()) throw new Error("upload image requires a regular file.");
+    if (stats.size > MAX_UPLOAD_IMAGE_BYTES) {
+      throw new Error("upload image files must be 20 MiB or smaller.");
+    }
+    const file = await fs.openAsBlob(filePath, { type });
     const form = new FormData();
     form.set("image", file, path.basename(filePath));
     return this.request("POST", "/image/upload", {
@@ -175,6 +203,7 @@ export class GrowthStudioClient {
   }
 
   async listVideos(options = {}) {
+    validateListVideosOptions(options);
     return this.request("GET", "/videos", {
       query: {
         limit: options.limit,
@@ -186,14 +215,14 @@ export class GrowthStudioClient {
   }
 
   async listFolders(options = {}) {
-    return this.requestFolderApi("GET", "/folder/list", {
+    return this.request("GET", "/folders", {
       traceId: options.traceId,
     });
   }
 
   async createFolder(payload, options = {}) {
     validateFolderPayload(payload);
-    return this.requestFolderApi("POST", "/folder/create", {
+    return this.request("POST", "/folders", {
       json: payload,
       traceId: options.traceId,
     });
@@ -210,26 +239,37 @@ export class GrowthStudioClient {
 
   async pollVideo(videoId, options = {}) {
     const timeoutMs = options.timeoutMs ?? 30 * 60 * 1000;
-    const startedAt = Date.now();
-    let waitSeconds = options.initialDelaySeconds ?? 5;
+    const startedAt = this.now();
+    const fallbackDelaySeconds = Math.max(
+      MIN_FALLBACK_POLL_DELAY_SECONDS,
+      options.fallbackDelaySeconds ?? 5,
+    );
+    let waitSeconds = Math.max(MIN_INITIAL_POLL_DELAY_SECONDS, options.initialDelaySeconds ?? 5);
 
     while (true) {
-      if (waitSeconds > 0) await this.sleep(waitSeconds * 1000);
+      await this.sleep(waitSeconds * 1000);
 
-      const result = await this.getVideo(videoId, { traceId: options.traceId });
+      let result;
+      try {
+        result = await this.getVideo(videoId, { traceId: options.traceId });
+      } catch (error) {
+        if (!isRetryableReadError(error) || this.now() - startedAt > timeoutMs) throw error;
+        waitSeconds = Math.max(MIN_FALLBACK_POLL_DELAY_SECONDS, error.retryAfter ?? fallbackDelaySeconds);
+        continue;
+      }
       const body = result.body;
-      const editStatus = body.edit?.latest?.status || body.edit?.status;
+      const editStatus = body.edit?.status || body.edit?.latest?.status;
       await options.onSnapshot?.(body);
 
       if (TERMINAL_STATUSES.has(body.status) && !isEditRunning(editStatus)) {
         return body;
       }
 
-      if (Date.now() - startedAt > timeoutMs) {
+      if (this.now() - startedAt > timeoutMs) {
         throw new Error(`Polling timed out for video_id ${videoId}.`);
       }
 
-      waitSeconds = result.retryAfter ?? options.fallbackDelaySeconds ?? 5;
+      waitSeconds = Math.max(MIN_FALLBACK_POLL_DELAY_SECONDS, result.retryAfter ?? fallbackDelaySeconds);
     }
   }
 
@@ -246,33 +286,22 @@ export class GrowthStudioClient {
       body = JSON.stringify(options.json);
     }
 
-    return parseResponse(await this.fetch(url, { method, headers, body }));
-  }
-
-  async requestFolderApi(method, path, options = {}) {
-    const url = buildUrl(this.baseUrl, `${this.folderApiPrefix}${path}`, options.query);
-    const headers = new Headers(options.headers);
-    headers.set("Authorization", `Bearer ${this.folderApiKey}`);
-    headers.set("Accept", "application/json");
-    if (options.traceId) headers.set("Ai-Trace-Id", options.traceId);
-
-    let body = options.body;
-    if (options.json !== undefined) {
-      headers.set("Content-Type", "application/json");
-      body = JSON.stringify(options.json);
+    // Only read-only GET requests are retried. Create, edit, upload, and folder
+    // creation have no idempotency keys, so a retry could duplicate billing or data.
+    const maxAttempts = method === "GET" ? Math.max(1, this.readRetry.maxAttempts) : 1;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await parseResponse(await this.fetch(url, { method, headers, body }));
+      } catch (error) {
+        if (attempt >= maxAttempts || !isRetryableReadError(error)) throw error;
+        await this.sleep(readRetryDelayMs(error.retryAfter, attempt, this.readRetry));
+      }
     }
-
-    const response = await parseResponse(await this.fetch(url, { method, headers, body }));
-    return {
-      ...response,
-      body: unwrapFolderApiEnvelope(response.body),
-    };
   }
 }
 
 export function createProductUrlPayload(sourceUrl, video = {}) {
   return {
-    ...(video.folderId ? { folder_id: video.folderId } : {}),
     product: {
       source_url: sourceUrl,
     },
@@ -285,29 +314,33 @@ export function createProductUrlPayload(sourceUrl, video = {}) {
       captions: video.captions ?? true,
       background_music: video.backgroundMusic ?? true,
       avatar: video.avatar || { mode: "auto" },
+      ...(video.folderId ? { folder_id: video.folderId } : {}),
     },
     ...(video.metadata ? { metadata: video.metadata } : {}),
   };
 }
 
-function unwrapFolderApiEnvelope(body) {
-  if (body && typeof body === "object" && "ErrCode" in body && body.ErrCode !== 0) {
-    const error = new Error(body.ErrMsg || `Growth Studio folder request failed with code ${body.ErrCode}.`);
-    error.code = body.ErrCode;
-    error.details = body.Resp;
-    throw error;
-  }
-
-  if (body && typeof body === "object" && "Resp" in body) return body.Resp || {};
-  return body;
+function isRetryableReadError(error) {
+  return error instanceof GrowthStudioApiError
+    && error.retryable === true
+    && (error.status === 429 || error.status >= 500);
 }
 
-function normalizeApiPrefix(prefix) {
-  if (!prefix || typeof prefix !== "string") return DEFAULT_FOLDER_API_PREFIX;
-  const trimmed = prefix.trim();
-  if (!trimmed) return DEFAULT_FOLDER_API_PREFIX;
-  const withoutTrailingSlash = trimmed.replace(/\/+$/g, "");
-  return withoutTrailingSlash.startsWith("/") ? withoutTrailingSlash : `/${withoutTrailingSlash}`;
+function readRetryDelayMs(retryAfter, attempt, policy) {
+  if (retryAfter !== undefined) return retryAfter * 1000;
+  return Math.min(policy.maxDelayMs, policy.baseDelayMs * (2 ** (attempt - 1)));
+}
+
+function toPlainJson(value) {
+  if (Array.isArray(value)) return value.map(toPlainJson);
+  if (value === null || typeof value !== "object") return value;
+  const output = {};
+  for (const [key, item] of Object.entries(value)) output[key] = toPlainJson(item);
+  return output;
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function isEditRunning(status) {

@@ -58,7 +58,6 @@ function assertLoopbackProviderUrls(overrides) {
   const providers = [
     ["PIXVERSE_PLATFORM_API_KEY", "PIXVERSE_PLATFORM_BASE_URL"],
     ["PIXVERSE_GROWTH_API_KEY", "PIXVERSE_GROWTH_BASE_URL"],
-    ["PIXVERSE_GROWTH_FOLDER_API_KEY", "PIXVERSE_GROWTH_BASE_URL"],
   ];
   for (const [credentialName, baseUrlName] of providers) {
     if (overrides[credentialName] && !isLoopbackUrl(overrides[baseUrlName])) {
@@ -83,7 +82,7 @@ function assertDotEnvProviderUrlIsLoopback(args, cwd, overrides) {
   const dotEnv = readDotEnv(path.join(cwd, ".env"));
   const credentialNames = provider === "platform"
     ? ["PIXVERSE_PLATFORM_API_KEY"]
-    : ["PIXVERSE_GROWTH_API_KEY", "PIXVERSE_GROWTH_FOLDER_API_KEY"];
+    : ["PIXVERSE_GROWTH_API_KEY"];
   const baseUrlName = provider === "platform"
     ? "PIXVERSE_PLATFORM_BASE_URL"
     : "PIXVERSE_GROWTH_BASE_URL";

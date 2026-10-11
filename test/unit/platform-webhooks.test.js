@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   createMemoryNonceStore,
   createPlatformWebhookHandler,
+  DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
   parsePlatformWebhook,
   verifyPlatformWebhook,
 } from "../../src/platform/webhooks.js";
@@ -96,7 +97,11 @@ for (const [name, configure] of [
   });
 }
 
-for (const [name, timestamp] of [["stale", TIMESTAMP - 301], ["future", TIMESTAMP + 301]]) {
+for (const [name, timestamp, options] of [
+  ["stale (default 6h window)", TIMESTAMP - (6 * 60 * 60) - 1, {}],
+  ["stale (configured window)", TIMESTAMP - 301, { timestampToleranceSeconds: 300 }],
+  ["future", TIMESTAMP + 301, {}],
+]) {
   test(`rejects a ${name} timestamp`, async () => {
     await assert.rejects(verifyPlatformWebhook({
       rawBody: RAW_BODY,
@@ -104,20 +109,122 @@ for (const [name, timestamp] of [["stale", TIMESTAMP - 301], ["future", TIMESTAM
       secret: SIGNING_KEY,
       now: () => TIMESTAMP,
       nonceStore: createMemoryNonceStore(),
+      ...options,
     }), (error) => error.code === "WEBHOOK_TIMESTAMP_OUT_OF_RANGE");
   });
 }
 
-test("rejects nonce replay, including concurrent verification", async () => {
+test("default timestamp window accepts the documented retry schedule reusing the original timestamp", async () => {
+  // 2s + 10s + 30s + 1m + 5m + 15m + 1h + 4h after the original attempt.
+  const lastRetryAge = 2 + 10 + 30 + 60 + 300 + 900 + 3_600 + 14_400;
+  const verified = await verifyPlatformWebhook({
+    rawBody: RAW_BODY,
+    headers: signedHeaders(RAW_BODY, { timestamp: TIMESTAMP - lastRetryAge }),
+    secret: SIGNING_KEY,
+    now: () => TIMESTAMP,
+    nonceStore: createMemoryNonceStore(),
+  });
+  assert.equal(await verified.release(), true);
+  assert.equal(DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS, 6 * 60 * 60);
+  assert.ok(DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS > lastRetryAge);
+});
+
+test("timestamp tolerance is configurable and validated", async () => {
+  const input = {
+    rawBody: RAW_BODY,
+    headers: signedHeaders(RAW_BODY, { timestamp: TIMESTAMP - 100 }),
+    secret: SIGNING_KEY,
+    now: () => TIMESTAMP,
+    nonceStore: createMemoryNonceStore(),
+  };
+  await assert.rejects(
+    verifyPlatformWebhook({ ...input, timestampToleranceSeconds: 99 }),
+    (error) => error.code === "WEBHOOK_TIMESTAMP_OUT_OF_RANGE",
+  );
+  const verified = await verifyPlatformWebhook({ ...input, timestampToleranceSeconds: 100 });
+  assert.equal(await verified.release(), true);
+  for (const invalid of [0, -1, 1.5, "300", 8 * 24 * 60 * 60]) {
+    await assert.rejects(
+      verifyPlatformWebhook({ ...input, timestampToleranceSeconds: invalid }),
+      (error) => error.code === "WEBHOOK_CONFIGURATION_INVALID",
+    );
+    assert.throws(
+      () => createPlatformWebhookHandler({
+        secret: SIGNING_KEY, onDelivery: async () => {}, timestampToleranceSeconds: invalid,
+      }),
+      (error) => error.code === "WEBHOOK_CONFIGURATION_INVALID",
+    );
+  }
+});
+
+test("nonce is held for the whole timestamp window", async () => {
+  const nonceStore = createMemoryNonceStore();
+  const first = await verifyPlatformWebhook({
+    rawBody: RAW_BODY, headers: signedHeaders(), secret: SIGNING_KEY, now: () => TIMESTAMP, nonceStore,
+  });
+  assert.equal(await first.commit(), true);
+  await assert.rejects(verifyPlatformWebhook({
+    rawBody: RAW_BODY,
+    headers: signedHeaders(),
+    secret: SIGNING_KEY,
+    now: () => TIMESTAMP + DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
+    nonceStore,
+  }), (error) => error.code === "WEBHOOK_REPLAY" && error.duplicate === true);
+});
+
+test("blocks concurrent verification of an in-flight nonce and flags committed replays as duplicates", async () => {
   const nonceStore = createMemoryNonceStore();
   const attempt = () => verifyPlatformWebhook({
     rawBody: RAW_BODY, headers: signedHeaders(), secret: SIGNING_KEY, now: () => TIMESTAMP, nonceStore,
   });
   const results = await Promise.allSettled([attempt(), attempt(), attempt()]);
   assert.equal(results.filter(({ status }) => status === "fulfilled").length, 1);
-  assert.equal(results.filter(({ status, reason }) => status === "rejected" && reason.code === "WEBHOOK_REPLAY").length, 2);
+  assert.equal(results.filter(({ status, reason }) => status === "rejected"
+    && reason.code === "WEBHOOK_DELIVERY_IN_PROGRESS" && reason.statusCode === 409).length, 2);
   const [{ value }] = results.filter(({ status }) => status === "fulfilled");
-  assert.equal(await value.release(), true);
+  assert.equal(await value.commit(), true);
+  await assert.rejects(attempt(), (error) => error.code === "WEBHOOK_REPLAY"
+    && error.duplicate === true && error.statusCode === 200);
+});
+
+test("deduplicates a redelivered event by payload id and status even with a fresh nonce", async () => {
+  const nonceStore = createMemoryNonceStore();
+  const success = JSON.stringify({ id: "123456789", status: 1, url: "https://example.test/v.mp4" });
+  const verify = (rawBody, nonce) => verifyPlatformWebhook({
+    rawBody, headers: signedHeaders(rawBody, { nonce }), secret: SIGNING_KEY, now: () => TIMESTAMP, nonceStore,
+  });
+  const first = await verify(success, "nonce-a");
+  assert.equal(await first.commit(), true);
+  await assert.rejects(verify(success, "nonce-b"), (error) => error.code === "WEBHOOK_DUPLICATE_EVENT"
+    && error.duplicate === true && error.statusCode === 200);
+  // The rejected redelivery released its own nonce reservation.
+  await assert.rejects(verify(success, "nonce-b"), (error) => error.code === "WEBHOOK_DUPLICATE_EVENT");
+
+  // A different status for the same id is a new event.
+  const failed = JSON.stringify({ id: "123456789", status: 8, url: null });
+  const next = await verify(failed, "nonce-c");
+  assert.equal(await next.commit(), true);
+
+  // A released (failed) delivery leaves the event open for the retry.
+  const other = JSON.stringify({ id: "987", status: 1 });
+  const attempt = await verify(other, "nonce-d");
+  assert.equal(await attempt.release(), true);
+  const retry = await verify(other, "nonce-e");
+  assert.equal(await retry.commit(), true);
+});
+
+test("an in-flight event blocks a concurrent redelivery with a different nonce", async () => {
+  const nonceStore = createMemoryNonceStore();
+  const rawBody = JSON.stringify({ id: "55", status: 1 });
+  const verify = (nonce) => verifyPlatformWebhook({
+    rawBody, headers: signedHeaders(rawBody, { nonce }), secret: SIGNING_KEY, now: () => TIMESTAMP, nonceStore,
+  });
+  const first = await verify("first");
+  await assert.rejects(verify("second"), (error) => error.code === "WEBHOOK_DELIVERY_IN_PROGRESS");
+  assert.equal(await first.release(), true);
+  // The losing attempt released its nonce, so its retry proceeds normally.
+  const retry = await verify("second");
+  assert.equal(await retry.commit(), true);
 });
 
 test("bounds and expires the in-memory nonce store", () => {
@@ -141,7 +248,7 @@ test("supports byte bodies, Headers, Date clocks, and Set replay stores", async 
   };
   const reserved = await verifyPlatformWebhook(input);
   assert.equal(reserved.nonce, "nonce-1");
-  await assert.rejects(verifyPlatformWebhook(input), (error) => error.code === "WEBHOOK_REPLAY");
+  await assert.rejects(verifyPlatformWebhook(input), (error) => error.code === "WEBHOOK_DELIVERY_IN_PROGRESS");
   assert.equal(await reserved.release(), true);
   const committed = await verifyPlatformWebhook(input);
   assert.equal(await committed.commit(), true);
@@ -158,7 +265,7 @@ test("standalone verification requires an explicit commit or release", async () 
     nonceStore,
   };
   const first = await verifyPlatformWebhook(input);
-  await assert.rejects(verifyPlatformWebhook(input), (error) => error.code === "WEBHOOK_REPLAY");
+  await assert.rejects(verifyPlatformWebhook(input), (error) => error.code === "WEBHOOK_DELIVERY_IN_PROGRESS");
   assert.equal(await first.release(), true);
   const retry = await verifyPlatformWebhook(input);
   assert.equal(await retry.commit(), true);
@@ -207,9 +314,8 @@ test("matches independent official-style insertion-order and sorted signature ve
   }
 });
 
-test("rejects composite and null values absent from the official canonicalization", async () => {
+test("rejects composite values absent from the official canonicalization", async () => {
   for (const [nonce, rawBody] of [
-    ["null-value", '{"id":"1","value":null}'],
     ["array-value", '{"id":"1","value":[1,2]}'],
     ["object-value", '{"id":"1","value":{"nested":true}}'],
   ]) {
@@ -221,6 +327,65 @@ test("rejects composite and null values absent from the official canonicalizatio
       nonceStore: createMemoryNonceStore(),
     }), (error) => error.code === "WEBHOOK_PAYLOAD_UNSUPPORTED");
   }
+});
+
+test("accepts null values signed as the official Node example serializes them", async () => {
+  const rawBody = '{"id":"123456789","status":8,"url":null,"has_audio":false}';
+  // Node example: new URLSearchParams(entries.map(([k, v]) => [k, String(v)])) -> url=null
+  const query = "id=123456789&status=8&url=null&has_audio=false";
+  const signature = createHmac("sha256", SIGNING_KEY)
+    .update(`${TIMESTAMP}\nnull-node\n${query}`)
+    .digest("base64");
+  const verified = await verifyPlatformWebhook({
+    rawBody,
+    headers: { "Webhook-Timestamp": String(TIMESTAMP), "Webhook-Nonce": "null-node", "Webhook-Signature": signature },
+    secret: SIGNING_KEY,
+    now: () => TIMESTAMP,
+    nonceStore: createMemoryNonceStore(),
+  });
+  assert.equal(verified.payload.url, null);
+  assert.equal(await verified.release(), true);
+
+  // Go url.Values.Encode (sorted, fmt %v -> <nil>) is accepted too.
+  const goQuery = "has_audio=false&id=123456789&status=8&url=%3Cnil%3E";
+  const goSignature = createHmac("sha256", SIGNING_KEY)
+    .update(`${TIMESTAMP}\nnull-go\n${goQuery}`)
+    .digest("base64");
+  const goVerified = await verifyPlatformWebhook({
+    rawBody,
+    headers: { "Webhook-Timestamp": String(TIMESTAMP), "Webhook-Nonce": "null-go", "Webhook-Signature": goSignature },
+    secret: SIGNING_KEY,
+    now: () => TIMESTAMP,
+    nonceStore: createMemoryNonceStore(),
+  });
+  assert.equal(await goVerified.release(), true);
+
+  // A null cannot be swapped for a different value under the same signature.
+  await assert.rejects(verifyPlatformWebhook({
+    rawBody: '{"id":"123456789","status":8,"url":"null","has_audio":false}',
+    headers: { "Webhook-Timestamp": String(TIMESTAMP), "Webhook-Nonce": "null-swap", "Webhook-Signature": goSignature },
+    secret: SIGNING_KEY,
+    now: () => TIMESTAMP,
+    nonceStore: createMemoryNonceStore(),
+  }), (error) => error.code === "WEBHOOK_SIGNATURE_INVALID");
+});
+
+test("sorted signatures use code-point key order, not locale order", async () => {
+  // localeCompare sorts "a" before "B"; Go/Java byte order sorts "B" first.
+  const rawBody = '{"a":"1","B":"2","_c":"3"}';
+  const byteOrderQuery = "B=2&_c=3&a=1";
+  assert.notEqual(["a", "B", "_c"].sort((l, r) => l.localeCompare(r)).join(), "B,_c,a");
+  const signature = createHmac("sha256", SIGNING_KEY)
+    .update(`${TIMESTAMP}\nbyte-order\n${byteOrderQuery}`)
+    .digest("base64");
+  const verified = await verifyPlatformWebhook({
+    rawBody,
+    headers: { "Webhook-Timestamp": String(TIMESTAMP), "Webhook-Nonce": "byte-order", "Webhook-Signature": signature },
+    secret: SIGNING_KEY,
+    now: () => TIMESTAMP,
+    nonceStore: createMemoryNonceStore(),
+  });
+  assert.equal(await verified.release(), true);
 });
 
 test("fails closed for invalid replay, clock, and header inputs", async () => {

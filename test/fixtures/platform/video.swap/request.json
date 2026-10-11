@@ -9,10 +9,10 @@
   "method": "POST",
   "path": "/openapi/v2/video/swap/generate",
   "body": {
-    "source_video_id": "1",
-    "keyframe_id": "1",
+    "source_video_id": 1,
+    "keyframe_id": 1,
     "mask_id": "person-1",
-    "img_id": "2",
+    "img_id": 2,
     "quality": "720p"
   }
 }

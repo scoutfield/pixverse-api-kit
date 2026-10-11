@@ -19,8 +19,8 @@ const AGENT_INPUT = Object.freeze({
   agent_id: "414562414124109",
   prompt: "Recreate pacing.",
   quality: "720p",
-  img_references: Object.freeze([{ img_url: "https://cdn.example.test/a.png" }]),
-  video_references: Object.freeze([{ video_url: "https://cdn.example.test/a.mp4" }]),
+  img_references: Object.freeze([{ img_id: "1" }]),
+  video_references: Object.freeze([{ video_media_id: "2" }]),
 });
 const MUSIC_MV_INPUT = Object.freeze({
   mv_agent_type: "vibe_mv_v3_custom",
@@ -375,4 +375,104 @@ test("polling respects a successful response Retry-After hint", async (t) => {
     sleep: async (milliseconds) => { delays.push(milliseconds); },
   });
   assert.deepEqual(delays, [2_000]);
+});
+
+function transientStatusClient(outcomes, counters) {
+  return {
+    execute: async (id) => {
+      if (id === "video.text") {
+        counters.submits += 1;
+        return { operation: id, traceId: TRACE, envelope: { ErrCode: 0, Resp: { video_id: "9" } }, data: { video_id: "9" } };
+      }
+      counters.reads += 1;
+      const next = outcomes.shift();
+      if (next instanceof Error) throw next;
+      return {
+        operation: id, traceId: `status-${counters.reads}`,
+        envelope: { ErrCode: 0, Resp: { id: "9", status: next } }, data: { id: "9", status: next },
+      };
+    },
+  };
+}
+
+test("status polling survives transient read errors and keeps a single billable submit", async (t) => {
+  const { PixverseCliError } = await import("../../src/core/errors.js");
+  const root = await createTempJobRoot(t);
+  const counters = { submits: 0, reads: 0 };
+  const delays = [];
+  let clock = 0;
+  const final = await submitPlatformJob(transientStatusClient([
+    5,
+    new PixverseCliError("socket closed", { category: "transport", provider: "platform", traceId: "t-a" }),
+    new PixverseCliError("busy", { category: "http", status: 503, retryAfter: 7 }),
+    new PixverseCliError("high load", { category: "provider", status: 200, code: 500069, retryable: true }),
+    1,
+  ], counters), "video.text", INPUT, {
+    jobRoot: root, traceIdFactory: () => TRACE, poll: true,
+    now: () => clock,
+    sleep: async (milliseconds) => { delays.push(milliseconds); clock += milliseconds; },
+  });
+  assert.equal(final.status, "succeeded");
+  assert.equal(counters.submits, 1);
+  assert.equal(counters.reads, 5);
+  // Default 5s cadence; then error backoff 5s, max(10s backoff, 7s Retry-After), 20s.
+  assert.deepEqual(delays, [5_000, 5_000, 10_000, 20_000]);
+  const artifacts = await readJobArtifacts(final.job_dir);
+  const errors = artifacts["polling.jsonl"].filter((entry) => entry.status === "poll_error");
+  assert.deepEqual(errors.map((entry) => entry.error.category), ["transport", "http", "provider"]);
+  assert.equal(errors[2].error.code, 500069);
+  assert.equal(artifacts["polling.jsonl"].at(-1).status, "succeeded");
+  assert.equal(artifacts["error.json"], undefined);
+});
+
+test("status polling fails immediately on a non-retryable read error", async (t) => {
+  const { PixverseCliError } = await import("../../src/core/errors.js");
+  const root = await createTempJobRoot(t);
+  const counters = { submits: 0, reads: 0 };
+  await assert.rejects(submitPlatformJob(transientStatusClient([
+    5,
+    new PixverseCliError("invalid id", { category: "provider", status: 200, code: 400017, retryable: false }),
+    1,
+  ], counters), "video.text", INPUT, {
+    jobRoot: root, traceIdFactory: () => TRACE, poll: true, sleep: async () => {}, now: () => 0,
+  }), (error) => error.code === 400017);
+  assert.equal(counters.submits, 1);
+  assert.equal(counters.reads, 2);
+});
+
+test("status polling stops retrying transient errors once the caller aborts", async (t) => {
+  const { PixverseCliError } = await import("../../src/core/errors.js");
+  const root = await createTempJobRoot(t);
+  const counters = { submits: 0, reads: 0 };
+  const controller = new AbortController();
+  const client = transientStatusClient([], counters);
+  const execute = client.execute;
+  client.execute = async (id, input, options) => {
+    if (id !== "video.text") {
+      controller.abort();
+      throw new PixverseCliError("socket closed", { category: "transport" });
+    }
+    return execute(id, input, options);
+  };
+  await assert.rejects(submitPlatformJob(client, "video.text", INPUT, {
+    jobRoot: root, traceIdFactory: () => TRACE, poll: true, signal: controller.signal,
+    sleep: async () => {}, now: () => 0,
+  }), (error) => error.category === "transport");
+});
+
+test("default polling uses a 5s cadence and a resumable 30 minute timeout", async (t) => {
+  const root = await createTempJobRoot(t);
+  const counters = { submits: 0, reads: 0 };
+  const delays = [];
+  let clock = 0;
+  const outcomes = new Array(1_000).fill(5);
+  await assert.rejects(submitPlatformJob(transientStatusClient(outcomes, counters), "video.text", INPUT, {
+    jobRoot: root, traceIdFactory: () => TRACE, poll: true,
+    now: () => clock,
+    sleep: async (milliseconds) => { delays.push(milliseconds); clock += milliseconds; },
+  }), (error) => error.category === "timeout" && error.details.timeout_ms === 30 * 60 * 1_000
+    && error.details.id === "9");
+  assert.ok(delays.every((delay) => delay === 5_000));
+  assert.equal(clock, 30 * 60 * 1_000);
+  assert.equal(counters.submits, 1);
 });

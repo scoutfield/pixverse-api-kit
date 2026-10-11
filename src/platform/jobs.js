@@ -7,7 +7,7 @@ import {
   readJsonArtifact,
   writeJsonArtifact,
 } from "../core/artifacts.js";
-import { PixverseCliError, serializeError } from "../core/errors.js";
+import { isTransientReadError, PixverseCliError, serializeError } from "../core/errors.js";
 import { pollUntilTerminal } from "../core/polling.js";
 import { redact } from "../core/redaction.js";
 import { createTraceId } from "../core/trace.js";
@@ -15,8 +15,12 @@ import { getPlatformOperation } from "./operations.js";
 import { normalizePlatformStatus } from "./status.js";
 import { normalizeAndValidatePlatformInput } from "./validation.js";
 
-const DEFAULT_INTERVAL_MS = 3_000;
-const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
+// Official status guidance: poll no more often than every 5 seconds.
+const DEFAULT_INTERVAL_MS = 5_000;
+// Generation can legitimately run well past 10 minutes (the FAQ covers jobs
+// exceeding 10 minutes and 2 hours). A timeout is resumable from the job
+// directory, so this only bounds a single waiting session.
+const DEFAULT_TIMEOUT_MS = 30 * 60 * 1_000;
 
 export async function submitPlatformJob(client, operationId, input, options = {}) {
   const operation = requireBillableOperation(operationId);
@@ -152,6 +156,16 @@ async function pollKnownJob(client, { jobDir, operation, id, traceId, options })
       onSnapshot: (snapshot) => appendJsonLineArtifact(
         path.join(jobDir, "polling.jsonl"), snapshot, { rootDir: jobDir },
       ),
+      // A status read is read-only: transport failures, HTTP 429/5xx, and
+      // retryable ErrCodes (for example 500069 high load) must not abandon a
+      // job that is still generating. Keep polling with backoff until the
+      // overall timeout. The billable submission above is never retried.
+      isRetryableError: (error) => options.signal?.aborted !== true && isTransientReadError(error),
+      onPollError: (error, { consecutiveErrors }) => appendJsonLineArtifact(
+        path.join(jobDir, "polling.jsonl"),
+        transientPollRecord(error, consecutiveErrors),
+        { rootDir: jobDir },
+      ),
       intervalMs: options.intervalMs ?? DEFAULT_INTERVAL_MS,
       timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       sleep: async (milliseconds) => {
@@ -180,6 +194,23 @@ async function pollKnownJob(client, { jobDir, operation, id, traceId, options })
     await persistFailure(jobDir, recoveryError, { operation: operation.id, traceId });
     throw recoveryError;
   }
+}
+
+function transientPollRecord(error, consecutiveErrors) {
+  const publicError = serializeError(error);
+  return redact({
+    status: "poll_error",
+    terminal: false,
+    transient: true,
+    consecutive_errors: consecutiveErrors,
+    error: {
+      category: publicError.category ?? inferErrorCategory(error),
+      ...(publicError.status === undefined ? {} : { status: publicError.status }),
+      ...(publicError.code === undefined ? {} : { code: publicError.code }),
+      ...(publicError.retry_after === undefined ? {} : { retry_after: publicError.retry_after }),
+      ...(publicError.trace_id === undefined ? {} : { trace_id: publicError.trace_id }),
+    },
+  });
 }
 
 function timeoutRecoveryError(error, { jobDir, id }) {

@@ -10,7 +10,7 @@
   "method": "POST",
   "path": "/openapi/v2/video/extend/generate",
   "body": {
-    "source_video_id": "1",
+    "source_video_id": 1,
     "prompt": "Continue.",
     "seed": 1,
     "quality": "720p",

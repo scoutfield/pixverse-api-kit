@@ -10,6 +10,8 @@ import { inspectLocalMedia as inspectMedia } from "../../core/media.js";
 import { normalizeAndValidateMusicMv, validatePositiveDecimalId } from "./music-mv.js";
 
 const VIDEO_SOURCES = ["source_video_id", "video_media_id"];
+const EXTEND_MODELS = ["v3.5", "v4", "v4.5", "v5", "v5.5", "v6"];
+const SEED_MAXIMUM = 2_147_483_647;
 
 export async function validateSpecializedOperation(operation, payload, query = payload, context = {}) {
   switch (operation.id) {
@@ -50,11 +52,23 @@ export async function validateSpecializedOperation(operation, payload, query = p
       return;
     case "video.sound-effect":
       requireExactlyOneField(operation, payload, VIDEO_SOURCES);
-      requireFields(operation, payload, ["prompt"]);
+      // The API has no prompt field; the sound description is sound_effect_content.
+      if (payload.prompt !== undefined) {
+        throw validationError(operation, "sound-effect has no prompt field; describe the sound with sound_effect_content.");
+      }
+      if (payload.sound_effect_content !== undefined && typeof payload.sound_effect_content !== "string") {
+        throw validationError(operation, "sound_effect_content must be a string.");
+      }
+      if (payload.original_sound_switch !== undefined && typeof payload.original_sound_switch !== "boolean") {
+        throw validationError(operation, "original_sound_switch must be a boolean.");
+      }
       return;
     case "video.extend":
       requireExactlyOneField(operation, payload, VIDEO_SOURCES);
       requireFields(operation, payload, ["prompt", "seed", "quality", "duration", "model"]);
+      if (!EXTEND_MODELS.includes(payload.model)) {
+        throw validationError(operation, `extend model must be one of ${EXTEND_MODELS.join(", ")}.`);
+      }
       validateModelScalars(operation, payload);
       return;
     case "video.motion-control":
@@ -102,8 +116,9 @@ function validateUsage(operation, payload) {
 
 function validateTemplateQuery(operation, query) {
   if (query.type !== undefined && ![1, 2, "1", "2"].includes(query.type)) throw validationError(operation, "type must be 1 or 2.");
-  if (query.page !== undefined) validatePositiveInteger(operation, query.page, "page");
-  if (query.pageSize !== undefined && ![10, 20, 50, 100].includes(query.pageSize)) throw validationError(operation, "pageSize must be 10, 20, 50, or 100.");
+  // The reference types these query values as strings, e.g. page "1" and pageSize "50".
+  if (query.page !== undefined) validatePositiveInteger(operation, toIntegerOrSelf(query.page), "page");
+  if (query.pageSize !== undefined && ![10, 20, 50, 100].includes(toIntegerOrSelf(query.pageSize))) throw validationError(operation, "pageSize must be 10, 20, 50, or 100.");
 }
 
 function validateTtsQuery(operation, query) {
@@ -118,6 +133,16 @@ async function validateViralAgent(operation, payload, context) {
   validateModelScalars(operation, payload, { qualities: ["720p", "1080p"], aspectRatios: ["9:16", "16:9", "1:1", "4:3", "3:4", "21:9"] });
   if (!Array.isArray(payload.img_references) || payload.img_references.length < 1 || payload.img_references.length > 5) throw validationError(operation, "img_references must contain between 1 and 5 images.");
   if (!Array.isArray(payload.video_references) || payload.video_references.length !== 1) throw validationError(operation, "video_references must contain exactly one video.");
+  // Each reference must carry an uploaded asset ID; the API has no URL or file fields here.
+  payload.img_references.forEach((reference, index) => {
+    if (!isReferenceObject(reference) || !isPresent(reference.img_id)) {
+      throw validationError(operation, `img_references[${index}] requires an img_id from upload image.`);
+    }
+  });
+  payload.video_references.forEach((reference, index) => {
+    if (!isReferenceObject(reference)) throw validationError(operation, `video_references[${index}] must be an object.`);
+    requireExactlyOneField(operation, reference, VIDEO_SOURCES, `video_references[${index}] source_video_id or video_media_id`);
+  });
   const inspector = context.inspectLocalMedia ?? inspectMedia;
   for (const reference of payload.img_references) {
     const file = localReferencePath(reference);
@@ -132,13 +157,25 @@ async function validateViralAgent(operation, payload, context) {
     if (metadata.duration_seconds < 2 || metadata.duration_seconds > 30) throw validationError(operation, "Viral-agent video duration must be between 2 and 30 seconds.");
     if (metadata.width < 640 || metadata.width > 1920 || metadata.height < 640 || metadata.height > 1920) throw validationError(operation, "Viral-agent video width and height must each be between 640 and 1920 pixels.");
   }
+  // Local paths only feed the media checks above and must not reach the API.
+  return {
+    ...payload,
+    img_references: payload.img_references.map(withoutLocalPath),
+    video_references: payload.video_references.map(withoutLocalPath),
+  };
+}
+
+function withoutLocalPath({ file, local_path, ...reference }) {
+  return reference;
 }
 
 function validateRealEstateAgent(operation, payload) {
   requireFields(operation, payload, ["agent_id", "model"]);
   if (payload.agent_id !== "419629433597950") throw validationError(operation, "real estate agent_id must be 419629433597950.");
   if (!["pro", "fast"].includes(payload.model)) throw validationError(operation, "real estate model must be pro or fast.");
-  if (payload.mode !== undefined && payload.model !== "pro") throw validationError(operation, "mode is supported only by the pro real estate model.");
+  for (const field of ["mode", "duration", "video_style", "lip_sync_tts_speaker_id"]) {
+    if (payload[field] !== undefined && payload.model !== "pro") throw validationError(operation, `${field} is supported only by the pro real estate model.`);
+  }
   if (payload.mode !== undefined && !["property_tour", "ad_house_tour"].includes(payload.mode)) throw validationError(operation, "mode must be property_tour or ad_house_tour.");
   if (isPresent(payload.product_url)) {
     validateSafeRemoteUrl(operation, "product_url", payload.product_url);
@@ -162,11 +199,14 @@ function validateRealEstateAgent(operation, payload) {
   if (payload.quality !== undefined) validateQuality(operation, payload.quality, qualities);
 }
 
+function toIntegerOrSelf(value) {
+  return typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+}
 function validatePositiveInteger(operation, value, name) {
   if (!Number.isInteger(value) || value < 1) throw validationError(operation, `${name} must be a positive integer.`);
 }
 function validateOptionalSeed(operation, value) {
-  if (value !== undefined && (!Number.isInteger(value) || value < 0)) throw validationError(operation, "seed must be a non-negative integer.");
+  if (value !== undefined && (!Number.isInteger(value) || value < 0 || value > SEED_MAXIMUM)) throw validationError(operation, `seed must be an integer from 0 to ${SEED_MAXIMUM}.`);
 }
 function validateKeyframe(operation, value, required) {
   if (!isPresent(value)) {
@@ -174,13 +214,12 @@ function validateKeyframe(operation, value, required) {
     return;
   }
   const normalized = typeof value === "number" && Number.isSafeInteger(value) ? String(value) : value;
-  const minimum = operation.id === "video.swap-mask" ? 0n : 1n;
+  // Documented range: 1 to the position of the last video frame.
   if (typeof normalized !== "string"
     || !/^\d+$/.test(normalized)
-    || BigInt(normalized) < minimum
+    || BigInt(normalized) < 1n
     || BigInt(normalized) > BigInt(Number.MAX_SAFE_INTEGER)) {
-    const range = minimum === 0n ? "non-negative" : "positive";
-    throw validationError(operation, `keyframe_id must be a ${range} safe-integer string.`);
+    throw validationError(operation, "keyframe_id must be a positive safe-integer string.");
   }
 }
 function validateQuality(operation, value, allowed) {
@@ -188,6 +227,9 @@ function validateQuality(operation, value, allowed) {
 }
 function validateMaximumItems(operation, value, field, maximum) {
   if (value !== undefined && (!Array.isArray(value) || value.length > maximum)) throw validationError(operation, `${field} must contain no more than ${maximum} items.`);
+}
+function isReferenceObject(reference) {
+  return reference !== null && typeof reference === "object" && !Array.isArray(reference);
 }
 function localReferencePath(reference) {
   if (!reference || typeof reference !== "object" || Array.isArray(reference)) return undefined;

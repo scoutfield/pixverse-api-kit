@@ -1,3 +1,21 @@
+import JSONBigFactory from "json-bigint";
+
+// Parse recorded JSON bodies losslessly so an integer ID above 2^53 can be
+// told apart from a rounded neighbour (and from a JSON string).
+const JSON_BIG = JSONBigFactory({ useNativeBigInt: true });
+
+export function parseLosslessJson(text) {
+  return withPlainPrototypes(JSON_BIG.parse(text));
+}
+
+function withPlainPrototypes(value) {
+  if (Array.isArray(value)) return value.map(withPlainPrototypes);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, withPlainPrototypes(item)]));
+  }
+  return value;
+}
+
 export function createRecordingFetch(responses = []) {
   const calls = [];
   let responseIndex = 0;
@@ -30,7 +48,7 @@ export function jsonResponse(body, init = {}) {
 
 export async function describeRecordedBody(body) {
   if (body === undefined || body === null) return null;
-  if (typeof body === "string") return JSON.parse(body);
+  if (typeof body === "string") return parseLosslessJson(body);
   if (body instanceof FormData) {
     const fields = {};
     for (const [name, value] of body.entries()) {

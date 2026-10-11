@@ -302,7 +302,7 @@ test("Growth Studio executable still loads provider configuration from cwd doten
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "pixverse-growth-home-"));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const server = http.createServer((request, response) => {
-    assert.equal(request.url, "/marketing_hub/folder/list");
+    assert.equal(request.url, "/openapi/v1/folders");
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ folders: [] }));
   });
@@ -411,7 +411,7 @@ test("executable routes load dedicated API credentials from the user auth store"
 
 test("legacy executable preserves JSON stdout and emits one deprecation line", async () => {
   const server = http.createServer((request, response) => {
-    assert.equal(request.url, "/marketing_hub/folder/list");
+    assert.equal(request.url, "/openapi/v1/folders");
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ folders: [{ folder_id: "630251570268735431" }] }));
   });

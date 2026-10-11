@@ -46,9 +46,8 @@ export class PlatformClient {
     headers.set("Accept", "application/json");
     headers.set("API-KEY", this.apiKey);
     headers.set("Ai-trace-id", traceId);
-    const retry = operation.billing === "read-only" && RETRYABLE_METHODS.has(operation.method)
-      ? this.retry
-      : { maxAttempts: 1 };
+    const retrySafe = operation.billing === "read-only" && RETRYABLE_METHODS.has(operation.method);
+    const retry = retrySafe ? this.retry : { maxAttempts: 1 };
 
     let response;
     try {
@@ -63,6 +62,9 @@ export class PlatformClient {
         provider: "platform",
         operation: operation.id,
         traceId,
+        // Read-only retries need a unique Ai-trace-id per attempt. A recovery
+        // trace is never rotated: it only exists for single-attempt submissions.
+        nextTraceId: retrySafe && options.recovery !== true ? this.traceIdFactory : undefined,
         signal: options.signal,
       });
     } catch (error) {
@@ -70,20 +72,23 @@ export class PlatformClient {
         parsePlatformEnvelope(normalizePlatformResponseIdentifiers(error.details), {
           operation: operation.id,
           httpStatus: error.status,
-          traceId,
+          traceId: error.traceId ?? traceId,
+          retryAfter: error.retryAfter,
         });
       }
       throw error;
     }
+    const attemptTraceId = response.traceId ?? traceId;
     const parsed = parsePlatformEnvelope(normalizePlatformResponseIdentifiers(response.body), {
       operation: operation.id,
       httpStatus: response.status,
-      traceId,
+      traceId: attemptTraceId,
+      retryAfter: response.retryAfter,
     });
 
     return {
       operation: operation.id,
-      traceId,
+      traceId: attemptTraceId,
       envelope: parsed.envelope,
       data: parsed.data,
       retryAfter: response.retryAfter,

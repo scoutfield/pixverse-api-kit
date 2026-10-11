@@ -37,7 +37,7 @@ const DOCUMENTATION_URLS = Object.freeze({
   "video.avatar": "https://docs.platform.pixverse.ai/avatar-generation-40528034e0",
   "agent.viral-recreation": "https://docs.platform.pixverse.ai/viral-recreation-agent-41205382e0",
   "agent.real-estate": "https://docs.platform.pixverse.ai/one-click-real-estate-video-42843647e0",
-  "agent.music-mv": "https://aisphere.feishu.cn/wiki/L8pgwGoSwiDbQ8ksGIHcppcvnrc",
+  "agent.music-mv": "https://docs.platform.pixverse.ai/one-click-vibemv-44175576e0",
   "video.status": "https://docs.platform.pixverse.ai/get-video-generation-status-13016632e0",
 });
 

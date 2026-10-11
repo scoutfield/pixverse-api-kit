@@ -75,13 +75,16 @@ test("rejects invalid signatures and malformed payloads before delivery", async 
   assert.equal(mutations, 0);
 });
 
-test("rejects replay and non-POST or oversized requests without delivery", async (t) => {
+test("acknowledges a verified replay with ok without redelivery; rejects non-POST or oversized requests", async (t) => {
   let deliveries = 0;
   const rawBody = JSON.stringify({ event: "ready" });
   const url = await startHandler(t, { onDelivery: async () => { deliveries += 1; } });
   const options = { method: "POST", headers: headersFor(rawBody), body: rawBody };
   assert.equal((await fetch(url, options)).status, 200);
-  assert.equal((await fetch(url, options)).status, 409);
+  const replay = await fetch(url, options);
+  // PixVerse resends until it receives exact `ok`, so a duplicate is acknowledged.
+  assert.equal(replay.status, 200);
+  assert.equal(await replay.text(), "ok");
   assert.equal((await fetch(url)).status, 405);
 
   const oversized = "x".repeat(1_048_577);
@@ -90,6 +93,25 @@ test("rejects replay and non-POST or oversized requests without delivery", async
   });
   assert.equal(oversizedResponse.status, 413);
   assert.equal(deliveries, 1);
+});
+
+test("a redelivery of the same id and status with a fresh nonce is acknowledged once", async (t) => {
+  const events = [];
+  const url = await startHandler(t, { onDelivery: async (payload) => events.push(payload) });
+  const success = JSON.stringify({ id: "123456789", status: 1, url: "https://example.test/v.mp4", has_audio: true });
+  for (const nonce of ["first-delivery", "redelivery-1", "redelivery-2"]) {
+    const response = await fetch(url, { method: "POST", headers: headersFor(success, { nonce }), body: success });
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), "ok");
+  }
+  assert.equal(events.length, 1);
+
+  const later = JSON.stringify({ id: "123456789", status: 8, url: null });
+  const response = await fetch(url, { method: "POST", headers: headersFor(later, { nonce: "status-8" }), body: later });
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "ok");
+  assert.equal(events.length, 2);
+  assert.equal(events[1].url, null);
 });
 
 test("blocks a concurrent duplicate while the first delivery is in progress", async (t) => {

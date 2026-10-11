@@ -305,7 +305,8 @@ test("Music MV rejects ambiguous aliases, unsupported enums, invalid switches, s
     await assert.rejects(normalizeAndValidatePlatformInput(operation, input), pattern);
   }
 
-  for (const mv_agent_type of ["vibe_mv", "vibe_mv_v3_custom"]) {
+  await assert.rejects(normalizeAndValidatePlatformInput(operation, { ...base, mv_agent_type: "vibe_mv" }), /mv_agent_type/);
+  for (const mv_agent_type of ["vibe_mv_v3", "vibe_mv_v3_custom"]) {
     const result = await normalizeAndValidatePlatformInput(operation, { ...base, mv_agent_type });
     assert.equal(result.payload.mv_agent_type, mv_agent_type);
   }
@@ -357,8 +358,8 @@ const distinguishingFieldCases = [
   }, "template_id"],
   ["video.sound-effect", {
     source_video_id: "1",
-    prompt: "Soft rain and distant thunder",
-  }, "prompt"],
+    sound_effect_content: "Soft rain and distant thunder",
+  }, "source_video_id"],
 ];
 
 for (const [id, validInput, distinguishingField] of distinguishingFieldCases) {
@@ -473,7 +474,20 @@ test("official multi-transition order and bounds are validated", async () => {
   await assert.rejects(normalizeAndValidatePlatformInput(operation, {
     ...base,
     multi_transition: [{ img_id: "1", duration: 0 }, { img_id: "2" }],
-  }), /duration.*positive/i);
+  }), /duration.*1 to 8/i);
+  // Documented bounds: 1-8 per item, 1-5 with three or more items, last item 0 or omitted.
+  await assert.rejects(normalizeAndValidatePlatformInput(operation, {
+    ...base,
+    multi_transition: [{ img_id: "1", duration: 9 }, { img_id: "2" }],
+  }), /duration.*1 to 8/i);
+  await assert.rejects(normalizeAndValidatePlatformInput(operation, {
+    ...base,
+    multi_transition: [{ img_id: "1", duration: 6 }, { img_id: "2", duration: 5 }, { img_id: "3" }],
+  }), /duration.*1 to 5/i);
+  await assert.rejects(normalizeAndValidatePlatformInput(operation, {
+    ...base,
+    multi_transition: [{ img_id: "1", duration: 3 }, { img_id: "2", duration: 4 }],
+  }), /last.*0 or omitted/i);
 });
 
 test("official mutually-exclusive source and lip-sync combinations are validated", async () => {
@@ -503,11 +517,11 @@ test("swap and swap-mask accept positive keyframe identifiers after string-safe 
   });
   assert.equal(mask.payload.keyframe_id, "12");
 
-  const firstFrameMask = await normalizeAndValidatePlatformInput(getPlatformOperation("video.swap-mask"), {
+  // The documented keyframe range starts at 1 for swap-mask as well as swap.
+  await assert.rejects(normalizeAndValidatePlatformInput(getPlatformOperation("video.swap-mask"), {
     source_video_id: "5",
     keyframe_id: 0,
-  });
-  assert.equal(firstFrameMask.payload.keyframe_id, "0");
+  }), /keyframe_id/);
 });
 
 test("keyframe identifiers apply endpoint-specific zero rules and reject invalid values", async () => {
@@ -554,11 +568,11 @@ test("checked-in tiny media fixtures are non-empty and viral-agent local referen
     agent_id: "414562414124109",
     prompt: "Recreate this rhythm without copying branding.",
     quality: "720p",
-    img_references: [{ file: "/safe/tiny.png" }],
-    video_references: [{ file: "/safe/tiny.mp4" }],
+    img_references: [{ img_id: "11", file: "/safe/tiny.png" }],
+    video_references: [{ video_media_id: "12", file: "/safe/tiny.mp4" }],
   };
   const calls = [];
-  await normalizeAndValidatePlatformInput(operation, input, {
+  const validated = await normalizeAndValidatePlatformInput(operation, input, {
     inspectLocalMedia: async (file, options) => {
       calls.push({ file, options });
       return file.endsWith(".png")
@@ -569,10 +583,78 @@ test("checked-in tiny media fixtures are non-empty and viral-agent local referen
   assert.equal(calls.length, 2);
   assert.equal(calls[0].options.maxBytes, 20 * 1024 * 1024);
   assert.equal(calls[1].options.maxBytes, 100 * 1024 * 1024);
+  // Local paths only drive the media checks; the API receives the uploaded IDs.
+  assert.deepEqual(validated.payload.img_references, [{ img_id: "11" }]);
+  assert.deepEqual(validated.payload.video_references, [{ video_media_id: "12" }]);
+  await assert.rejects(normalizeAndValidatePlatformInput(operation, {
+    ...input,
+    img_references: [{ img_url: "https://cdn.example.test/a.png" }],
+  }), /img_references\[0\] requires an img_id/);
+  await assert.rejects(normalizeAndValidatePlatformInput(operation, {
+    ...input,
+    img_references: [{ img_id: "11" }],
+    video_references: [{ video_url: "https://cdn.example.test/a.mp4" }],
+  }), /video_references\[0\]/);
 
   await assert.rejects(normalizeAndValidatePlatformInput(operation, input, {
     inspectLocalMedia: async (file) => file.endsWith(".png")
       ? { size_bytes: 100, width: 1000, height: 1000 }
       : { size_bytes: 100, width: 1080, height: 1080, duration_seconds: 31 },
   }), /duration.*2.*30/i);
+});
+
+test("validators follow the documented field rules found in the API doc review", async () => {
+  const validate = (id, input) => normalizeAndValidatePlatformInput(getPlatformOperation(id), input);
+
+  // Template prompts may be empty because the template supplies them.
+  const template = await validate("video.template", {
+    template_id: "302325299692608", img_id: "1", model: "v6", duration: 5, quality: "720p",
+  });
+  assert.equal(template.payload.prompt, "");
+
+  // Sound effects describe the sound with sound_effect_content; prompt is not an API field.
+  await validate("video.sound-effect", { video_media_id: "1" });
+  await assert.rejects(validate("video.sound-effect", { video_media_id: "1", prompt: "Rain" }), /sound_effect_content/);
+  await assert.rejects(validate("video.sound-effect", { video_media_id: "1", original_sound_switch: "yes" }), /boolean/);
+
+  // Music MV: aspect_ratio and quality are optional, and the style lists match the public doc.
+  const mvBase = { mv_agent_type: "vibe_mv_v3_custom", audio_media_id: "1" };
+  await validate("agent.music-mv", mvBase);
+  await validate("agent.music-mv", { ...mvBase, music_style: "Hip Hop", mv_style: "Golden Age" });
+  await assert.rejects(validate("agent.music-mv", { ...mvBase, mv_style: "Vintage" }), /mv_style/);
+  await assert.rejects(validate("agent.music-mv", {
+    ...mvBase, mv_style: "Cinematic", style_img_references: [{ img_id: "2" }],
+  }), /style_img_references.*Custom/);
+
+  // Transition only reads first_frame_img/last_frame_img.
+  await assert.rejects(validate("video.transition", {
+    prompt: "Morph", model: "v6", duration: 5, quality: "720p", first_frame_url: "https://cdn.example.test/a.png", last_frame_img: "2",
+  }), /first_frame_img is required/);
+
+  // Avatar TTS scripts must be 30-200 characters.
+  await assert.rejects(validate("video.avatar", {
+    img_id: "1", quality: "720p", lip_sync_tts_speaker_id: "auto", lip_sync_tts_content: "Too short.",
+  }), /30 to 200/);
+
+  // v6 omni fusion may reference only videos, at most two.
+  const omni = { model: "v6", reference_mode: "omni", prompt: "Recreate @video1", duration: 0, quality: "720p", aspect_ratio: "auto" };
+  await validate("video.fusion", { ...omni, video_references: [{ video_media_id: "1" }] });
+  await assert.rejects(validate("video.fusion", {
+    ...omni, video_references: [{ video_media_id: "1" }, { video_media_id: "2" }, { video_media_id: "3" }],
+  }), /two reference videos/);
+
+  // Extend is not available on c1; real-estate pro-only fields are rejected for fast.
+  await assert.rejects(validate("video.extend", {
+    source_video_id: "1", prompt: "Continue", seed: 1, quality: "720p", duration: 5, model: "c1",
+  }), /extend model/);
+  await assert.rejects(validate("agent.real-estate", {
+    agent_id: "419629433597950", model: "fast", product_url: "https://listing.example.test/home", video_style: "cozy",
+  }), /video_style.*pro/);
+
+  // Template list query values are documented as strings.
+  const templates = await validate("resource.templates", { page: "1", pageSize: "50" });
+  assert.equal(templates.query.pageSize, "50");
+
+  // Restyle seeds share the documented 32-bit ceiling.
+  await assert.rejects(validate("video.restyle", { video_media_id: "1", restyle_id: "2", seed: 2_147_483_648 }), /seed/);
 });

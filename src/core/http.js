@@ -21,17 +21,32 @@ export async function requestHttp(options) {
     now = Date.now,
     provider,
     operation,
-    traceId,
+    traceId: initialTraceId,
+    traceHeader = "Ai-trace-id",
+    nextTraceId,
     signal,
   } = options;
   const normalizedMethod = method.toUpperCase();
   const maxAttempts = normalizeMaxAttempts(retry?.maxAttempts);
   const canRetry = RETRYABLE_METHODS.has(normalizedMethod) && maxAttempts > 1;
+  if (nextTraceId !== undefined && typeof nextTraceId !== "function") {
+    throw new TypeError("nextTraceId must be a function.");
+  }
+  let traceId = initialTraceId;
+  let attemptHeaders = headers;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (attempt > 1 && nextTraceId) {
+      // PixVerse treats a repeated Ai-trace-id as the same request and can
+      // return the cached previous result, so each read-only retry gets a
+      // fresh trace. Billable submissions never reach this path: they are
+      // single-attempt and deliberately keep their persisted recovery trace.
+      traceId = nextTraceId();
+      attemptHeaders = withHeader(headers, traceHeader, traceId);
+    }
     let response;
     try {
-      response = await fetchImpl(url, { method: normalizedMethod, headers, body, signal });
+      response = await fetchImpl(url, { method: normalizedMethod, headers: attemptHeaders, body, signal });
     } catch (cause) {
       const aborted = signal?.aborted === true || cause?.name === "AbortError";
       const error = new PixverseCliError("PixVerse API transport request failed.", {
@@ -67,6 +82,7 @@ export async function requestHttp(options) {
         headers: response.headers,
         status: response.status,
         retryAfter,
+        traceId,
       };
     }
 
@@ -141,6 +157,21 @@ function httpError(response, body, context) {
     traceId: context.traceId,
     details: body,
   });
+}
+
+function withHeader(headers, name, value) {
+  if (headers instanceof Headers) {
+    const copy = new Headers(headers);
+    copy.set(name, value);
+    return copy;
+  }
+  const copy = {};
+  const lowerName = name.toLowerCase();
+  for (const [key, entry] of Object.entries(headers ?? {})) {
+    if (key.toLowerCase() !== lowerName) copy[key] = entry;
+  }
+  copy[name] = value;
+  return copy;
 }
 
 function normalizeMaxAttempts(value) {

@@ -129,7 +129,11 @@ pixverse-api growth-studio folders ensure "Campaign Alpha"
 pixverse-api growth-studio upload image /absolute/path/product.webp
 ```
 
-`folders ensure` accepts either the positional name shown above or `--folder-name <name>`.
+`folders ensure` accepts either the positional name shown above or `--folder-name <name>`. The name is trimmed and otherwise sent unchanged; an existing folder is reused only on an exact (trimmed) name match.
+
+Folders use the documented `GET /openapi/v1/folders` and `POST /openapi/v1/folders` endpoints with the same `PIXVERSE_GROWTH_API_KEY` bearer credential as every other Growth Studio call. A resolved folder is sent as the string `video.folder_id` in the create payload.
+
+`upload image` accepts `.jpg`, `.jpeg`, `.png`, or `.webp` files of at most 20 MiB and rejects other files before any network request.
 
 ### PDP videos
 
@@ -187,8 +191,12 @@ pixverse-api growth-studio video edit <video_id> <clip_index> <instruction>
 Folder options for creation are mutually exclusive targeting choices:
 
 - `--folder-id <folder_id>` uses a verified existing folder.
-- `--folder-name <name>` reuses a case-insensitive match or creates the folder.
-- `--auto-folder` infers a name from supported payload metadata or the merchant URL.
+- `--folder-name <name>` reuses an exact (trimmed) name match or creates the folder with that name unchanged.
+- `--auto-folder` infers a normalized name from supported payload metadata or the merchant URL and reuses a case-insensitive match.
+
+A payload that already contains `video.folder_id` keeps that folder; no folder is listed or created. `video list --limit` must be an integer from 1 through 100 and `--status` one of `queued`, `processing`, `succeeded`, `failed`, or `canceled`. `video edit` requires a `clip_index` from 1 through 40 and a non-empty instruction of at most 500 characters.
+
+Read-only requests (`avatars list`, `folders list`, `video get`/`status`/`list`, and polling) retry on HTTP 429 and retryable 5xx responses, honoring `Retry-After` (seconds or HTTP date) and otherwise using capped exponential backoff. Video create, video edit, image upload, and folder create are never retried automatically.
 
 The existing general `create-from-url`, `create-from-json`, and `video edit` commands have no dry-run mode. They can create billable asynchronous work and do not provide the full durable job workflow. Prefer `run-job` for new general video generation. PDP is a separate workflow and does provide `pdp create --dry-run`.
 
@@ -211,20 +219,11 @@ pixverse-api growth-studio resume /absolute/path/jobs/<job-dir> \
   [--fallback-delay-seconds 5]
 ```
 
-Timing values must be finite: `--timeout-minutes` must be greater than zero, while both delay values may be zero or greater. By default, `run-job` polls to a terminal state. `--no-poll` returns after recording the create response and string `video_id`.
+Timing values must be finite: `--timeout-minutes` must be greater than zero. Polling never waits less than five seconds before the first status read or less than one second between later reads; smaller delay values are raised to those minimums. By default, `run-job` polls to a terminal state. `--no-poll` returns after recording the create response and string `video_id`.
 
 `resume` reads `video-id.json` and continues polling only. It never calls the create endpoint. With no saved video ID it reports `reconciliation_required`, preserving the evidence needed to investigate an ambiguous submission.
 
 Growth Studio jobs use `jobs/` by default and can contain `request.json`, `folder.json`, `create-response.json`, `video-id.json`, `polling.jsonl`, `final.json`, and `error.json`. PDP jobs omit folder resolution and can additionally contain `ledger-source-id.json`. A resumed nonterminal `final.json` is preserved as `final-prior-N.json`. JSON artifacts are private, atomic, and recursively redacted.
-
-### Growth Studio folder configuration
-
-If folder management uses a different API prefix or token, configure either or both values without changing the video-generation credential:
-
-```bash
-PIXVERSE_GROWTH_FOLDER_API_PREFIX=/marketing_hub
-PIXVERSE_GROWTH_FOLDER_API_KEY=...
-```
 
 ### Legacy aliases
 

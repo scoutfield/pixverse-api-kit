@@ -11,10 +11,10 @@
   "path": "/openapi/v2/video/img/generate",
   "body": {
     "duration": 5,
-    "img_id": "629000000000000001",
+    "img_id": 629000000000000001,
     "model": "v6",
     "prompt": "Animate.",
     "quality": "720p",
-    "template_id": "42"
+    "template_id": 42
   }
 }

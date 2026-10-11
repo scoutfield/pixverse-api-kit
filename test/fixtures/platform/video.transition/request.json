@@ -10,8 +10,8 @@
   "method": "POST",
   "path": "/openapi/v2/video/transition/generate",
   "body": {
-    "first_frame_img": "1",
-    "last_frame_img": "2",
+    "first_frame_img": 1,
+    "last_frame_img": 2,
     "prompt": "Transition.",
     "model": "v6",
     "duration": 5,

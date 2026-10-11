@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { GrowthStudioApiError } from "../src/http.js";
 import { resumeGrowthStudioJob, runVideoJob } from "../src/jobs.js";
 
 test("runVideoJob writes durable job artifacts and returns final output", async () => {
@@ -102,7 +103,7 @@ test("runVideoJob can inject a folder_id override into the submitted payload", a
     async createVideo(receivedPayload) {
       assert.deepEqual(receivedPayload, {
         ...originalPayload,
-        folder_id: "630251570268735431",
+        video: { ...originalPayload.video, folder_id: "630251570268735431" },
       });
       return { body: { video_id: "627410861853514292", status: "processing" } };
     },
@@ -118,8 +119,9 @@ test("runVideoJob can inject a folder_id override into the submitted payload", a
   });
   const request = JSON.parse(await fs.readFile(path.join(result.job_dir, "request.json"), "utf8"));
 
-  assert.equal(request.payload.folder_id, "630251570268735431");
-  assert.equal(originalPayload.folder_id, undefined);
+  assert.equal(request.payload.video.folder_id, "630251570268735431");
+  assert.equal(request.payload.folder_id, undefined);
+  assert.equal(originalPayload.video.folder_id, undefined);
 });
 
 test("runVideoJob resolves an auto folder before creating the video", async () => {
@@ -137,7 +139,8 @@ test("runVideoJob resolves an auto folder before creating the video", async () =
       throw new Error("createFolder should not be called");
     },
     async createVideo(receivedPayload) {
-      assert.equal(receivedPayload.folder_id, "636771263750078906");
+      assert.equal(receivedPayload.video.folder_id, "636771263750078906");
+      assert.equal(receivedPayload.folder_id, undefined);
       return { body: { video_id: "627410861853514292", status: "processing" } };
     },
     async pollVideo() {
@@ -153,11 +156,36 @@ test("runVideoJob resolves an auto folder before creating the video", async () =
   const request = JSON.parse(await fs.readFile(path.join(result.job_dir, "request.json"), "utf8"));
   const folder = JSON.parse(await fs.readFile(path.join(result.job_dir, "folder.json"), "utf8"));
 
-  assert.equal(request.payload.folder_id, "636771263750078906");
+  assert.equal(request.payload.video.folder_id, "636771263750078906");
   assert.equal(result.folder_id, "636771263750078906");
   assert.equal(result.folder_name, "REVOLVE");
   assert.equal(folder.source, "existing-folder");
-  assert.equal(originalPayload.folder_id, undefined);
+  assert.equal(originalPayload.video.folder_id, undefined);
+});
+
+test("runVideoJob keeps a payload video.folder_id without resolving another folder", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "pixverse-api-job-"));
+  const payload = {
+    metadata: { customer: "REVOLVE" },
+    product: { source_url: "https://www.revolve.com/item" },
+    video: { aspect_ratio: "9:16", folder_id: "630251570268735431" },
+  };
+  const client = {
+    async listFolders() {
+      throw new Error("listFolders should not be called");
+    },
+    async createFolder() {
+      throw new Error("createFolder should not be called");
+    },
+    async createVideo(receivedPayload) {
+      assert.deepEqual(receivedPayload, payload);
+      return { body: { video_id: "627410861853514292", status: "processing" } };
+    },
+  };
+
+  const result = await runVideoJob(client, payload, { jobsDir: root, autoFolder: true, poll: false });
+
+  assert.equal(result.folder_id, "630251570268735431");
 });
 
 test("runVideoJob writes private atomic artifacts with recursive credential redaction", async () => {
@@ -277,6 +305,35 @@ test("runVideoJob persists a redacted recovery error without exposing upstream d
   assert.equal(failure.code, "UPSTREAM_REJECTED");
   assert.equal(failure.trace_id, "trace-error");
   assert.equal(JSON.stringify(failure).includes("super-secret"), false);
+});
+
+test("runVideoJob persists request_id and redacted details in error.json", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "pixverse-api-error-"));
+  await assert.rejects(
+    runVideoJob({
+      async createVideo() {
+        throw new GrowthStudioApiError("Insufficient balance.", {
+          status: 402,
+          code: "INSUFFICIENT_BALANCE",
+          retryable: false,
+          requestId: "req_402_fixture",
+          details: { required: "1.00", api_key: "leaked-fixture-value" },
+        });
+      },
+    }, {
+      product: { source_url: "https://shop.example.com/item" },
+      video: { aspect_ratio: "9:16" },
+    }, { jobsDir: root, traceId: "trace-402" }),
+    /Insufficient balance/,
+  );
+  const [jobDir] = (await fs.readdir(root)).map((entry) => path.join(root, entry));
+  const failure = JSON.parse(await fs.readFile(path.join(jobDir, "error.json"), "utf8"));
+
+  assert.equal(failure.status, 402);
+  assert.equal(failure.code, "INSUFFICIENT_BALANCE");
+  assert.equal(failure.request_id, "req_402_fixture");
+  assert.deepEqual(failure.details, { required: "1.00", api_key: "[REDACTED]" });
+  assert.equal(JSON.stringify(failure).includes("leaked-fixture-value"), false);
 });
 
 async function fileExists(filePath) {

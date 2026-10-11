@@ -1,12 +1,12 @@
 {
   "input": {
     "source_video_id": "1",
-    "prompt": "Rain."
+    "sound_effect_content": "Rain."
   },
   "method": "POST",
   "path": "/openapi/v2/video/sound_effect/generate",
   "body": {
-    "source_video_id": "1",
-    "prompt": "Rain."
+    "source_video_id": 1,
+    "sound_effect_content": "Rain."
   }
 }
