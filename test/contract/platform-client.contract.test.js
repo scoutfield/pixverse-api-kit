@@ -275,6 +275,18 @@ test("Music MV uint64 identifiers stay strings internally but serialize as lossl
   assert.equal(fusionRequest.body, '{"model":"v6","image_references":[{"img_id":892421142,"ref_name":"front"},{"img_id":892421144,"ref_name":"side"}],"prompt":"@front @side walk.","duration":15,"quality":"1080p","aspect_ratio":"9:16","generate_audio_switch":true}');
   assert.equal(fusionInput.payload.image_references[0].img_id, "892421142");
 
+  // Live API checks: fusion video_references IDs must be integers even though
+  // the schema says string (quoted values are rejected with 400013).
+  const fusionVideoRequest = await buildPlatformRequest({
+    id: "video.fusion", method: "POST", path: "/fusion", bodyMode: "json",
+  }, {
+    payload: { video_references: [{ source_video_id: "429187502447488", ref_name: "video1" }] },
+    query: {},
+    pathParams: {},
+    files: {},
+  });
+  assert.equal(fusionVideoRequest.body, '{"video_references":[{"source_video_id":429187502447488,"ref_name":"video1"}]}');
+
   // Fields the reference types as string stay strings even next to integer IDs.
   const modifyRequest = await buildPlatformRequest({
     id: "video.modify", method: "POST", path: "/modify", bodyMode: "json",
