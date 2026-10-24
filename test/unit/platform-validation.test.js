@@ -33,6 +33,7 @@ const invalidById = Object.freeze({
   "video.motion-control": {},
   "video.modify": {},
   "video.upscale": {},
+  "video.expand": {},
   "video.avatar": {},
   "agent.viral-recreation": {},
   "agent.real-estate": {},

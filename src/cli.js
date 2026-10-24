@@ -66,7 +66,11 @@ export async function main(argv = [], context = {}) {
         return 0;
       }
       const runPlatform = context.runPlatformCommand ?? runDefaultPlatformCommand;
-      stdout.write(formatSuccess(await runPlatform(route.providerArgs, providerContext)));
+      const result = await runPlatform(route.providerArgs, providerContext);
+      stdout.write(formatSuccess(result));
+      const { formatPlatformCost } = await import("./platform/pricing.js");
+      const costLine = formatPlatformCost(result?.cost ?? result?.cost_estimate);
+      if (costLine) stderr.write(`${costLine}\n`);
       return 0;
     }
 

@@ -25,7 +25,7 @@ export function parsePlatformEnvelope(body, context = {}) {
 
   const errorCode = Number(body.ErrCode);
   if (errorCode !== 0) {
-    throw new PixverseCliError(body.ErrMsg || `Platform API failed with ErrCode ${body.ErrCode}.`, {
+    throw new PixverseCliError(platformErrorMessage(body), {
       category: "provider",
       provider: "platform",
       operation: context.operation,
@@ -42,6 +42,20 @@ export function parsePlatformEnvelope(body, context = {}) {
     envelope: body,
     data: body.Resp,
   };
+}
+
+// Error Details: an optional Error object explains the cause, the related
+// fields, and the values the endpoint accepts.
+function platformErrorMessage(body) {
+  const base = body.ErrMsg || `Platform API failed with ErrCode ${body.ErrCode}.`;
+  const detail = body.Error;
+  if (detail === null || typeof detail !== "object" || typeof detail.Message !== "string" || detail.Message === "") {
+    return base;
+  }
+  const allowed = Array.isArray(detail.Param?.AllowedValues) && detail.Param.AllowedValues.length > 0
+    ? ` Allowed values: ${detail.Param.AllowedValues.join(", ")}.`
+    : "";
+  return `${base}: ${detail.Message}${allowed}`;
 }
 
 function isEnvelope(value) {

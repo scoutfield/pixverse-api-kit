@@ -28,6 +28,7 @@ Use only `PIXVERSE_PLATFORM_API_KEY` and the default `https://app-api.pixverse.a
 4. Submit once with a fresh trace ID, preferably through `run-job`; Platform billable commands wait by default and preserve the job directory, result ID, polling history, and terminal result.
 5. Use `--no-wait` only when asynchronous return is required, then continue the known job with `resume`. If submission was ambiguous and no result ID was saved, stop at `reconciliation_required`; do not resubmit.
 6. Treat success as transport success plus `ErrCode === 0`.
+7. After every Platform call, report the dollar cost from the result's `cost` field (credits and USD, plus whether it is provider-reported or an estimate). Before a billable submission, quote the `--dry-run` `cost_estimate`.
 
 Use `platform raw` only for diagnosis or a newly documented endpoint absent from the specialized catalog. Do not use raw access to bypass specialized validation, authentication, trace, billing, or recovery controls.
 
@@ -60,6 +61,7 @@ Use `platform raw` only for diagnosis or a newly documented endpoint absent from
 - operation:video.motion-control
 - operation:video.modify
 - operation:video.upscale
+- operation:video.expand
 - operation:video.avatar
 - operation:agent.viral-recreation
 - operation:agent.real-estate

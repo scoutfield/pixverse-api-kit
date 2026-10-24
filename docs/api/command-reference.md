@@ -62,7 +62,7 @@ pixverse-api platform <resource> <operation> [--payload /absolute/path/input.jso
 | Guided video | `video transition`, `video multi-transition`, `video fusion`, `video motion-control` | Billable |
 | Speech and sound | `video lip-sync`, `video avatar`, `video sound-effect` | Billable |
 | Editing | `video restyle`, `video swap-mask`, `video swap`, `video modify` | Billable |
-| Finishing | `video extend`, `video upscale` | Billable |
+| Finishing | `video extend`, `video upscale`, `video expand` | Billable |
 | Agents | `agent viral-recreation`, `agent real-estate`, `agent music-mv` | Billable |
 | Retrieval | `video status` | Read-only |
 

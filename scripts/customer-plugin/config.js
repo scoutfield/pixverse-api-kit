@@ -48,6 +48,7 @@ export const CUSTOMER_PLUGIN_ALLOWLIST = Object.freeze({
     "src/platform/operations/uploads.js",
     "src/platform/operations/video-editing.js",
     "src/platform/operations/video-generation.js",
+    "src/platform/pricing.js",
     "src/platform/request.js",
     "src/platform/status.js",
     "src/platform/validation.js",

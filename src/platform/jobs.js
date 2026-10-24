@@ -12,6 +12,7 @@ import { pollUntilTerminal } from "../core/polling.js";
 import { redact } from "../core/redaction.js";
 import { createTraceId } from "../core/trace.js";
 import { getPlatformOperation } from "./operations.js";
+import { estimatePlatformCost, finalJobCost, platformCallCost } from "./pricing.js";
 import { normalizePlatformStatus } from "./status.js";
 import { normalizeAndValidatePlatformInput } from "./validation.js";
 
@@ -42,6 +43,7 @@ export async function submitPlatformJob(client, operationId, input, options = {}
     trace_id: traceId,
     headers: { "API-KEY": "[REDACTED]", "Ai-trace-id": traceId },
     input: normalized,
+    cost_estimate: estimatePlatformCost(operation, normalized.payload),
   }));
 
   try {
@@ -58,25 +60,27 @@ export async function submitPlatformJob(client, operationId, input, options = {}
       signal: options.signal,
     });
     await writeArtifact(jobDir, "create-response.json", redact(created.envelope));
+    const cost = created.cost ?? platformCallCost(operation, { payload: normalized.payload, data: created.data });
+    await writeArtifact(jobDir, "cost.json", cost);
     const id = extractResultId(operation, created.envelope);
     if (id !== undefined) await writeIdArtifact(jobDir, operation, id);
 
     if (!operation.asynchronous || !options.poll) {
       if (!operation.asynchronous) {
         const final = {
-          ...submittedResult({ operation, created, id, jobDir, status: "succeeded" }),
+          ...submittedResult({ operation, created, id, jobDir, status: "succeeded", cost }),
           terminal: true,
         };
         await writeArtifact(jobDir, "final.json", final);
         return final;
       }
-      return submittedResult({ operation, created, id, jobDir, status: "submitted" });
+      return submittedResult({ operation, created, id, jobDir, status: "submitted", cost });
     }
     if (id === undefined) throw jobError("Platform response did not contain the documented result ID.", {
       category: "response", operation: operation.id, traceId, code: "MISSING_PLATFORM_JOB_ID",
     });
     return await pollKnownJob(client, {
-      jobDir, operation, id, traceId, options,
+      jobDir, operation, id, traceId, options, submittedCost: cost,
     });
   } catch (error) {
     await persistFailure(jobDir, error, { operation: operation.id, traceId });
@@ -106,12 +110,16 @@ export async function resumePlatformJob(client, jobDirectory, options = {}) {
 
   if (completed) await archiveTimeoutFinal(jobDir);
 
+  const submittedCost = await readOptionalArtifact(jobDir, "cost.json")
+    ?? request.cost_estimate
+    ?? estimatePlatformCost(operation, request.input?.payload);
   return pollKnownJob(client, {
     jobDir,
     operation,
     id,
     traceId: request.trace_id,
     options,
+    submittedCost,
   });
 }
 
@@ -130,7 +138,7 @@ async function archiveTimeoutFinal(jobDir) {
   throw new Error("Could not preserve the prior timeout artifact.");
 }
 
-async function pollKnownJob(client, { jobDir, operation, id, traceId, options }) {
+async function pollKnownJob(client, { jobDir, operation, id, traceId, options, submittedCost }) {
   let lastSnapshot;
   let retryAfterMs = 0;
   try {
@@ -178,7 +186,7 @@ async function pollKnownJob(client, { jobDir, operation, id, traceId, options })
       operation: operation.id,
       traceId,
     });
-    const final = finalJobSnapshot({ operation, traceId, jobDir, id, snapshot: finalSnapshot });
+    const final = finalJobSnapshot({ operation, traceId, jobDir, id, snapshot: finalSnapshot, submittedCost });
     await writeArtifact(jobDir, "final.json", final);
     if (final.status !== "succeeded") throw terminalStatusError(final);
     return final;
@@ -188,7 +196,7 @@ async function pollKnownJob(client, { jobDir, operation, id, traceId, options })
       : error;
     if (error?.category === "timeout" && lastSnapshot) {
       await writeArtifactIfMissing(jobDir, "final.json", finalJobSnapshot({
-        operation, traceId, jobDir, id, snapshot: lastSnapshot,
+        operation, traceId, jobDir, id, snapshot: lastSnapshot, submittedCost,
       }));
     }
     await persistFailure(jobDir, recoveryError, { operation: operation.id, traceId });
@@ -237,7 +245,7 @@ function defaultSleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function submittedResult({ operation, created, id, jobDir, status }) {
+function submittedResult({ operation, created, id, jobDir, status, cost }) {
   return {
     provider: "platform",
     operation: operation.id,
@@ -247,10 +255,12 @@ function submittedResult({ operation, created, id, jobDir, status }) {
     status,
     envelope: redact(created.envelope),
     data: redact(created.data),
+    ...(cost === undefined ? {} : { cost }),
   };
 }
 
-function finalJobSnapshot({ operation, traceId, jobDir, id, snapshot }) {
+function finalJobSnapshot({ operation, traceId, jobDir, id, snapshot, submittedCost }) {
+  const cost = finalJobCost(submittedCost, snapshot.data);
   return {
     provider: "platform",
     operation: operation.id,
@@ -259,6 +269,7 @@ function finalJobSnapshot({ operation, traceId, jobDir, id, snapshot }) {
     ...snapshot,
     status_trace_id: snapshot.trace_id,
     trace_id: traceId,
+    ...(cost === undefined ? {} : { cost }),
   };
 }
 

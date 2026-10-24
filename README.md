@@ -207,7 +207,7 @@ The Platform provider covers every specialized endpoint currently documented by 
 | Guided video generation | `video.transition`, `video.multi-transition`, `video.fusion`, `video.motion-control` | First/last-frame transitions, ordered keyframes, references, and motion transfer |
 | Speech and sound | `video.lip-sync`, `video.avatar`, `video.sound-effect` | Lip sync, talking portraits, and synchronized generated audio |
 | Video editing | `video.restyle`, `video.swap-mask`, `video.swap`, `video.modify` | Style transfer, subject or region replacement, and prompt-directed edits |
-| Video finishing | `video.extend`, `video.upscale` | Clip continuation and resolution enhancement |
+| Video finishing | `video.extend`, `video.upscale`, `video.expand` | Clip continuation, resolution enhancement, and aspect-ratio expansion |
 | Specialized agents | `agent.viral-recreation`, `agent.real-estate`, `agent.music-mv` | Viral recreation, real-estate video, and one-click Music MV workflows |
 | Retrieval | `video.status` | Poll a known video generation without resubmitting it |
 

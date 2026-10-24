@@ -4,6 +4,7 @@ import { createTraceId } from "../core/trace.js";
 import { DEFAULT_PLATFORM_BASE_URL } from "./config.js";
 import { parsePlatformEnvelope } from "./envelope.js";
 import { getPlatformOperation } from "./operations.js";
+import { platformCallCost } from "./pricing.js";
 import { buildPlatformRequest } from "./request.js";
 import { normalizeAndValidatePlatformInput } from "./validation.js";
 
@@ -92,6 +93,7 @@ export class PlatformClient {
       envelope: parsed.envelope,
       data: parsed.data,
       retryAfter: response.retryAfter,
+      cost: platformCallCost(operation, { payload: normalizedInput.payload, data: parsed.data }),
     };
   }
 }

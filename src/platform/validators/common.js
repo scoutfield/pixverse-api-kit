@@ -107,6 +107,8 @@ export function validatePrompt(operation, payload, options = {}) {
   }
 }
 
+const V6_MAX_OPERATIONS = new Set(["video.text", "video.image"]);
+
 export function validateModelScalars(operation, payload, options = {}) {
   validatePrompt(operation, payload, { maxLength: options.promptMaxLength ?? 5000 });
   if (payload.model !== undefined && (typeof payload.model !== "string" || payload.model.trim() === "")) {
@@ -116,7 +118,11 @@ export function validateModelScalars(operation, payload, options = {}) {
   if (payload.quality !== undefined && !qualities.includes(String(payload.quality).toLowerCase())) {
     throw validationError(operation, "quality must be a supported resolution value.");
   }
-  const documentedDurationMaximum = ["v6", "c1"].includes(payload.model) ? 15 : undefined;
+  // V6 Max currently serves text-to-video and image-to-video only (pricing and capability map).
+  if (payload.model === "v6-max" && !V6_MAX_OPERATIONS.has(operation.id)) {
+    throw validationError(operation, "model v6-max supports only text-to-video and image-to-video.");
+  }
+  const documentedDurationMaximum = ["v6-max", "v6", "c1"].includes(payload.model) ? 15 : undefined;
   if (payload.duration !== undefined && (!Number.isInteger(payload.duration)
     || payload.duration < 1
     || (documentedDurationMaximum !== undefined && payload.duration > documentedDurationMaximum))) {

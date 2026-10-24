@@ -10,6 +10,7 @@ import { PlatformClient } from "./client.js";
 import { getPlatformConfig } from "./config.js";
 import { resumePlatformJob, submitPlatformJob } from "./jobs.js";
 import { getPlatformOperation, PLATFORM_OPERATIONS, matchPlatformCommand } from "./operations.js";
+import { creditsToUsd, estimatePlatformCost } from "./pricing.js";
 import { buildPlatformRequest } from "./request.js";
 import { normalizeAndValidatePlatformInput } from "./validation.js";
 
@@ -173,6 +174,7 @@ async function createDryRun(operation, input, context) {
   return redact({
     dry_run: true,
     operation: operation.id,
+    cost_estimate: estimatePlatformCost(operation, normalized.payload),
     request: {
       method: request.method,
       path: request.path,
@@ -327,7 +329,17 @@ async function runRawCommand(args, context) {
     status: response.status,
     data: response.body,
     retryAfter: response.retryAfter,
+    cost: rawCallCost(response.body),
   };
+}
+
+// Raw calls have no operation metadata; report whatever Resp.credits says.
+function rawCallCost(body) {
+  const credits = Number(body?.Resp?.credits);
+  if (body?.Resp?.credits === undefined || !Number.isFinite(credits)) {
+    return { credits: null, usd: null, source: "unknown", basis: "Raw response carried no Resp.credits." };
+  }
+  return { credits, usd: creditsToUsd(credits), source: "response" };
 }
 
 function parseRawOptions(args) {

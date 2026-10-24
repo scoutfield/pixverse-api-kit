@@ -26,6 +26,7 @@
   { "id": "video.motion-control", "Resp": { "video_id": "629000000000000017" } },
   { "id": "video.modify", "Resp": { "video_id": "629000000000000018" } },
   { "id": "video.upscale", "Resp": { "video_id": "629000000000000019" } },
+  { "id": "video.expand", "Resp": { "video_id": "629000000000000034", "credits": 120 } },
   { "id": "video.avatar", "Resp": { "video_id": "629000000000000020" } },
   { "id": "agent.viral-recreation", "Resp": { "video_id": "629000000000000021" } },
   { "id": "agent.real-estate", "Resp": { "video_id": "629000000000000022" } },

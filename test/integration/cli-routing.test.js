@@ -365,7 +365,7 @@ test("Platform executable lazily loads only its provider configuration from cwd 
     });
     assert.equal(result.exitCode, 0);
     assert.equal(JSON.parse(result.stdout).data.credit_monthly, 12);
-    assert.equal(result.stderr, "");
+    assert.equal(result.stderr, "Cost: $0 (non-billable call)\n");
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -403,7 +403,7 @@ test("executable routes load dedicated API credentials from the user auth store"
     });
     assert.equal(result.exitCode, 0);
     assert.equal(JSON.parse(result.stdout).data.credit_monthly, 18);
-    assert.equal(result.stderr, "");
+    assert.equal(result.stderr, "Cost: $0 (non-billable call)\n");
   } finally {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
