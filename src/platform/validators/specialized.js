@@ -12,6 +12,7 @@ import { normalizeAndValidateMusicMv, validatePositiveDecimalId } from "./music-
 const VIDEO_SOURCES = ["source_video_id", "video_media_id"];
 const EXTEND_MODELS = ["v3.5", "v4", "v4.5", "v5", "v5.5", "v6"];
 const SEED_MAXIMUM = 2_147_483_647;
+const EXPAND_ASPECT_RATIOS = ["16:9", "9:16", "21:9", "4:3", "3:4", "1:1"];
 
 export async function validateSpecializedOperation(operation, payload, query = payload, context = {}) {
   switch (operation.id) {
@@ -89,6 +90,17 @@ export async function validateSpecializedOperation(operation, payload, query = p
         if (isPresent(payload[field])) validatePositiveDecimalId(operation, field, payload[field]);
       }
       return;
+    case "video.expand":
+      requireExactlyOneField(operation, payload, VIDEO_SOURCES);
+      for (const field of VIDEO_SOURCES) {
+        if (isPresent(payload[field])) validatePositiveDecimalId(operation, field, payload[field]);
+      }
+      requireFields(operation, payload, ["aspect_ratio", "quality"]);
+      if (!EXPAND_ASPECT_RATIOS.includes(payload.aspect_ratio)) {
+        throw validationError(operation, `expand aspect_ratio must be one of ${EXPAND_ASPECT_RATIOS.join(", ")}.`);
+      }
+      validateQuality(operation, payload.quality, ["720p", "1080p"]);
+      return;
     case "agent.viral-recreation": return validateViralAgent(operation, payload, context);
     case "agent.real-estate": return validateRealEstateAgent(operation, payload);
     case "agent.music-mv": return normalizeAndValidateMusicMv(operation, payload);
@@ -110,7 +122,7 @@ function validateUsage(operation, payload) {
   }
   if (payload.limit !== undefined && (!Number.isInteger(payload.limit) || payload.limit < 1 || payload.limit > 100)) throw validationError(operation, "limit must be an integer from 1 to 100.");
   if (payload.credits_status !== undefined && !["consume", "refund"].includes(payload.credits_status)) throw validationError(operation, "credits_status must be consume or refund.");
-  const creationTypes = ["text_to_video", "image_to_video", "transition", "lip_sync", "extend", "sound_effect", "fusion", "restyle", "multi_transition", "swap", "agent", "swap_mask", "avatar", "image_to_image", "mimic", "modify", "upscale"];
+  const creationTypes = ["text_to_video", "image_to_video", "transition", "lip_sync", "extend", "sound_effect", "fusion", "restyle", "multi_transition", "swap", "agent", "swap_mask", "avatar", "image_to_image", "mimic", "modify", "upscale", "expand"];
   if (payload.creation_type !== undefined && (!Array.isArray(payload.creation_type) || payload.creation_type.some((item) => !creationTypes.includes(item)))) throw validationError(operation, "creation_type contains an unsupported operation type.");
 }
 

@@ -230,6 +230,24 @@
       "quality": "720p"
     }
   },
+  "video.expand": {
+    "description": "Expand a Platform-generated video to a 16:9 frame.",
+    "input": {
+      "source_video_id": "629000000000000005",
+      "aspect_ratio": "16:9",
+      "quality": "720p"
+    },
+    "alternatives": [
+      {
+        "label": "Expand an uploaded video to vertical 9:16",
+        "input": {
+          "video_media_id": "629000000000000003",
+          "aspect_ratio": "9:16",
+          "quality": "1080p"
+        }
+      }
+    ]
+  },
   "video.upscale": {
     "description": "Upscale a video uploaded through Platform media upload.",
     "input": {

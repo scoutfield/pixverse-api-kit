@@ -88,6 +88,7 @@ const INTEGER_ID_FIELDS = new Map(Object.entries({
   "video.motion-control": [...VIDEO_SOURCE_IDS, "img_id"],
   "video.modify": [...VIDEO_SOURCE_IDS, "img_ids[]", "keyframe_id"],
   "video.upscale": VIDEO_SOURCE_IDS,
+  "video.expand": VIDEO_SOURCE_IDS,
   "agent.viral-recreation": [
     "agent_id",
     "img_references[].img_id",

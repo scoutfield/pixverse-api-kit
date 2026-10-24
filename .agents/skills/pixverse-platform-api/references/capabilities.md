@@ -42,6 +42,7 @@ Choose by desired outcome first. Then check the exact operation row and a valida
 | Transfer or replicate motion | `video.motion-control` | Not a general prompt edit. |
 | Prompt-edit video content | `video.modify` | Optional masks/references narrow the edit. |
 | Increase output resolution | `video.upscale` | Enhancement after a video exists. |
+| Reframe a video to a new aspect ratio | `video.expand` | Generates content around the source frame; 720p or 1080p; billed by input duration. |
 
 ## Specialized agents and retrieval
 

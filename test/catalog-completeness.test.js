@@ -11,10 +11,10 @@ const ROOT = process.cwd();
 const PLATFORM_SKILL = path.join(ROOT, ".agents/skills/pixverse-platform-api/SKILL.md");
 const PLATFORM_OPERATION_REFERENCE = path.join(ROOT, ".agents/skills/pixverse-platform-api/references/operation-catalog.md");
 const ROUTER_SKILL = path.join(ROOT, ".agents/skills/pixverse-api/SKILL.md");
-// audio.verify has no public page yet; Music MV is documented as One-click VibeMV.
+// Music MV is documented as One-click VibeMV; audio.verify has its own page.
 const MUSIC_MV_DOCUMENTATION_URLS = {
-  "audio.verify": "https://aisphere.feishu.cn/wiki/L8pgwGoSwiDbQ8ksGIHcppcvnrc",
-  "agent.music-mv": "https://docs.platform.pixverse.ai/one-click-vibemv-44175576e0",
+  "audio.verify": "https://docs.platform.pixverse.ai/verify-uploaded-audio-43051207e0",
+  "agent.music-mv": "https://docs.platform.pixverse.ai/one-click-vibemv-44144151e0",
 };
 const MUSIC_MV_OPERATION_IDS = new Set(["audio.verify", "agent.music-mv"]);
 

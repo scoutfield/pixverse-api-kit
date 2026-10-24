@@ -7,6 +7,7 @@ const VIDEO_EDITING_ENDPOINTS = [
   ["video.motion-control", "motion-control", "/openapi/v2/video/mimic/generate"],
   ["video.modify", "modify", "/openapi/v2/video/modify/generate"],
   ["video.upscale", "upscale", "/openapi/v2/video/upscale/generate"],
+  ["video.expand", "expand", "/openapi/v2/video/expand/generate"],
 ];
 
 export const VIDEO_EDITING_OPERATIONS = [

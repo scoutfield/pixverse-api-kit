@@ -32,6 +32,7 @@ Read `references/platform-operations.md` beside this skill for the complete oper
 4. Prefer `run-job`, submit once with a fresh trace; Platform billable commands wait by default and preserve the job directory, result ID, polling history, and terminal result.
 5. Use `--no-wait` only when asynchronous return is required, then continue the known ID with `resume`. If acceptance is ambiguous and no ID was saved, stop for reconciliation instead of submitting again.
 6. Treat success as transport success plus provider `ErrCode` equal to zero.
+7. After every Platform call, report the dollar cost from the result's `cost` field (credits and USD at 225 credits = US$1, noting whether it is provider-reported or an estimate). Before a billable submission, quote the `--dry-run` `cost_estimate`.
 
 Use `platform raw` only to diagnose a documented endpoint absent from the installed specialized catalog. Never use it to bypass validation, billing confirmation, authentication, trace, or recovery controls.
 

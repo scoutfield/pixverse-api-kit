@@ -14,10 +14,10 @@ const REFERENCES = [
   "operation-catalog.md",
   "payload-examples.json",
 ];
-// audio.verify has no public page yet; Music MV is documented as One-click VibeMV.
+// Music MV is documented as One-click VibeMV; audio.verify has its own page.
 const MUSIC_MV_DOCUMENTATION_URLS = {
-  "audio.verify": "https://aisphere.feishu.cn/wiki/L8pgwGoSwiDbQ8ksGIHcppcvnrc",
-  "agent.music-mv": "https://docs.platform.pixverse.ai/one-click-vibemv-44175576e0",
+  "audio.verify": "https://docs.platform.pixverse.ai/verify-uploaded-audio-43051207e0",
+  "agent.music-mv": "https://docs.platform.pixverse.ai/one-click-vibemv-44144151e0",
 };
 const MUSIC_MV_OPERATION_IDS = new Set(["audio.verify", "agent.music-mv"]);
 
@@ -147,17 +147,14 @@ test("model, pricing, and limit guidance is dated and linked to primary sources"
   const skill = await readSkill("SKILL.md");
   const reference = await readSkill("references/models-pricing-and-limits.md");
   const officialPages = [
-    "https://docs.platform.pixverse.ai/model-overview-2140345m0",
-    "https://docs.platform.pixverse.ai/c1-2067883m0",
-    "https://docs.platform.pixverse.ai/v6-2056814m0",
-    "https://docs.platform.pixverse.ai/capability-matrix-2144288m0",
-    "https://docs.platform.pixverse.ai/pricing-796039m0",
-    "https://docs.platform.pixverse.ai/rate-limit-796040m0",
+    "https://docs.platform.pixverse.ai/model-capability-map-2394982m0",
+    "https://docs.platform.pixverse.ai/pixverse-api-pricing-2394995m0",
+    "https://docs.platform.pixverse.ai/concurrency-rules-2394990m0",
     "https://docs.platform.pixverse.ai/upload-image-13016631e0",
-    "https://docs.platform.pixverse.ai/upload-videoaudio-19094401e0",
+    "https://docs.platform.pixverse.ai/upload-media-video-and-audio-43051206e0",
   ];
   assert.match(skill, /references\/models-pricing-and-limits\.md/);
-  assert.match(reference, /Verified against official docs: 2026-09-20/);
+  assert.match(reference, /Verified against official docs: 2026-10-23/);
   assert.match(reference, /refresh|re-check|verify live/i);
   for (const page of officialPages) assert.ok(reference.includes(page), page);
   assert.ok(reference.includes(MUSIC_MV_DOCUMENTATION_URLS["agent.music-mv"]));

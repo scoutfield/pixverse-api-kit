@@ -51,7 +51,7 @@ test("Platform namespace is independent from Growth Studio configuration", async
 
   assert.equal(exitCode, 0, output.stderr());
   assert.equal(JSON.parse(output.stdout()).data.credit_monthly, 10);
-  assert.equal(output.stderr(), "");
+  assert.equal(output.stderr(), "Cost: $0 (non-billable call)\n");
   assert.equal(calls.length, 1);
   assert.equal(calls[0].headers.get("API-KEY"), "platform-fixture-key");
   assert.equal(calls[0].headers.has("Authorization"), false);

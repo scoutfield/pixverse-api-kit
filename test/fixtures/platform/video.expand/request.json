@@ -1,0 +1,14 @@
+{
+  "input": {
+    "source_video_id": "1",
+    "aspect_ratio": "16:9",
+    "quality": "720p"
+  },
+  "method": "POST",
+  "path": "/openapi/v2/video/expand/generate",
+  "body": {
+    "source_video_id": 1,
+    "aspect_ratio": "16:9",
+    "quality": "720p"
+  }
+}
