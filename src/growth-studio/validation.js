@@ -12,6 +12,8 @@ export const MAX_PRODUCT_IMAGES = 6;
 export const MAX_EDIT_CLIP_INDEX = 40;
 export const MAX_EDIT_INSTRUCTION_LENGTH = 500;
 export const MAX_LIST_LIMIT = 100;
+// The live API accepts only kind=uploaded (kind=product returns 400 INVALID_REQUEST).
+export const VIDEO_LIST_KINDS = Object.freeze(["uploaded"]);
 
 const LANGUAGE_SET = new Set(VIDEO_LANGUAGES);
 const STATUS_SET = new Set(VIDEO_STATUSES);
@@ -62,6 +64,9 @@ export function validateListVideosOptions(options = {}) {
   }
   if (options.cursor !== undefined && typeof options.cursor !== "string") {
     throw new Error("cursor must be a string.");
+  }
+  if (options.kind !== undefined && !VIDEO_LIST_KINDS.includes(options.kind)) {
+    throw new Error(`kind must be one of: ${VIDEO_LIST_KINDS.join(", ")}.`);
   }
 }
 
@@ -194,4 +199,23 @@ function assertOptionalString(value, label, maximumLength) {
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+const IMAGE_LIST_OPTION_FIELDS = new Set(["offset", "limit", "traceId"]);
+
+// GET /openapi/v1/images is undocumented (observed live 2026-10-23). It uses
+// ledger-style offset pagination; the server's exact limits are unverified, so the
+// CLI applies the documented wallet-ledger bounds (offset >= 0, limit 1-100).
+export function normalizeImageListOptions(options = {}) {
+  if (!isRecord(options)) throw new TypeError("Image list options must be a plain object.");
+  for (const field of Object.keys(options)) {
+    if (!IMAGE_LIST_OPTION_FIELDS.has(field)) throw new Error(`Unknown image list option: ${field}.`);
+  }
+  const offset = options.offset ?? 0;
+  const limit = options.limit ?? 20;
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new RangeError("offset must be a safe integer of at least 0.");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LIST_LIMIT) {
+    throw new RangeError(`limit must be a safe integer from 1 through ${MAX_LIST_LIMIT}.`);
+  }
+  return { offset, limit };
 }

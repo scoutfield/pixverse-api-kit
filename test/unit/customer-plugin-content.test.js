@@ -103,6 +103,7 @@ test("customer plugin includes the complete private-demo documentation set", asy
     "plugin/SECURITY.md",
     "plugin/SUPPORT.md",
     "plugin/examples/pdp-standard-high.json",
+    "plugin/examples/viral-clone-plus.json",
   ];
   for (const relativePath of requiredFiles) {
     const stats = await fs.stat(path.join(SOURCE_ROOT, relativePath));

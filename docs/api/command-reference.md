@@ -120,6 +120,8 @@ The raw escape hatch accepts `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, and `DELETE`
 
 ## Growth Studio
 
+Start at the [Growth Studio Overview](growth-studio-overview.md) for the full route table (public vs. undocumented), create-path comparison, and billing rules.
+
 ### Discovery, folders, and uploads
 
 ```bash
@@ -163,14 +165,43 @@ pixverse-api growth-studio pdp resume /absolute/path/jobs/<job-dir> [polling opt
 
 The public PDP payload contains only `product` and `video`; it rejects `type`, `source_url`, folder fields, seller fields, and arbitrary metadata. Brand and price are optional record fields, not documented generation controls. See [Growth Studio PDP Videos](growth-studio-pdp.md) for the complete payload, approval, artifact, and reconciliation contract.
 
+### Viral Clone and video import
+
+```bash
+pixverse-api growth-studio video import-url <public-mp4-url>
+pixverse-api growth-studio video list --kind uploaded
+pixverse-api growth-studio viral-clone create \
+  --payload /absolute/path/viral-clone.json \
+  --dry-run
+pixverse-api growth-studio viral-clone create \
+  --payload /absolute/path/viral-clone.json \
+  --confirm-billable \
+  [--jobs-dir jobs] [--job-name <name>] [--no-poll] [polling options]
+pixverse-api growth-studio viral-clone get <run_id>
+pixverse-api growth-studio viral-clone poll <run_id> [polling options]
+pixverse-api growth-studio viral-clone resume /absolute/path/jobs/<job-dir> [polling options]
+```
+
+`video import-url` sends exactly `{"url": ...}` to `POST /openapi/v1/video/upload` once (free, synchronous, never retried) and prints the returned `video_id`, `url`, `duration`, `width`, `height`, and `file_size`. `video list --kind` accepts only `uploaded`. Viral Clone create posts once to `POST /openapi/v1/viral-clone/runs`, writes `request.json`, `create-response.json`, `run-id.json`, `polling.jsonl`, `final.json`, and `error.json`, and polls `GET /openapi/v1/viral-clone/runs/{run_id}` every five seconds until `succeeded` or `failed`. Resume never re-creates. See [Growth Studio Viral Clone](growth-studio-viral-clone.md) for the payload, pricing, and reconciliation rules.
+
+### Model catalog and images (undocumented — observed live 2026-10-23)
+
+```bash
+pixverse-api growth-studio models list
+pixverse-api growth-studio images list [--offset 0] [--limit 20]
+```
+
+These read-only routes are not in the official integration guide; they were observed live on 2026-10-23 and may change. `models list` calls `GET /openapi/v1/models` and prints the catalog unchanged (`catalog_version`, `currency`, `price_unit`, `credit_rate_micro`, `video_models[]` with duration bounds, resolutions, aspect ratios, `call_types`, and `price_per_second_by_resolution`, plus `image_models[]`). Its price units are not explained by PixVerse, so do not treat them as a quote. `images list` calls `GET /openapi/v1/images` with offset pagination and returns `data[]` (string `image_id`, `source`, string `task_id`, `status`, `title`, `url`, `width`, `height`, `prompt`, `created_at`) and `pagination { offset, limit, total }`. The CLI applies `offset >= 0` and `limit` 1–100; the server's exact bounds are unverified. There is no single-image route (`GET /openapi/v1/images/{id}` returns 404).
+
 ### Wallet reads
 
 ```bash
 pixverse-api growth-studio wallet balance
+pixverse-api growth-studio wallet discount
 pixverse-api growth-studio wallet ledgers [--offset 0] [--limit 20]
 ```
 
-These calls are read-only. Balance is a snapshot, not a price quote, reservation, entitlement check, or substitute for billable approval. Ledger `offset` must be a non-negative integer and `limit` must be an integer from 1 through 100.
+These calls are read-only. Balance is a snapshot, not a price quote, reservation, entitlement check, or substitute for billable approval. Ledger `offset` must be a non-negative integer and `limit` must be an integer from 1 through 100 (default 20). Ledger amounts (`amount`, `original_amount`, `balance_before`, `balance_after`) are signed decimal strings; video `price` fields are pre-discount integer cents. Match a ledger `source_type`/`source_id` to a video's `ledger_source_type`/`ledger_source_id`. `wallet discount` returns `discount` (string percent such as `"70"`), `source` (`workspace`, `account`, or `default`), and `expires_at` (ISO 8601 or `null`). Error codes to branch on include `RUN_NOT_FOUND` (404), `CONCURRENCY_LIMIT_EXCEEDED` (429, honor the body's `retryable`), and `UPLOAD_FAILED` with `details.stage`.
 
 ### Existing URL-based and general videos
 
@@ -184,7 +215,7 @@ pixverse-api growth-studio video create-from-json \
 pixverse-api growth-studio video status <video_id>
 pixverse-api growth-studio video get <video_id>
 pixverse-api growth-studio video poll <video_id>
-pixverse-api growth-studio video list [--limit 20] [--status succeeded] [--cursor <cursor>]
+pixverse-api growth-studio video list [--limit 20] [--status succeeded] [--cursor <cursor>] [--kind uploaded]
 pixverse-api growth-studio video edit <video_id> <clip_index> <instruction>
 ```
 

@@ -7,8 +7,10 @@ import {
   resumeGrowthStudioJob,
   runGrowthStudioJob,
   runPdpJob,
+  runViralCloneJob,
 } from "./jobs.js";
 import { describePdpDryRun } from "./pdp.js";
+import { assertRunId, describeViralCloneDryRun } from "./viral-clone.js";
 import { assertVideoId } from "./validation.js";
 
 export const GROWTH_STUDIO_LEGACY_COMMAND_MAPPINGS = Object.freeze({
@@ -70,6 +72,12 @@ export async function runGrowthStudioCommand(args, context = {}) {
     const [videoId] = rest;
     return getClient().pollVideo(videoId, { traceId: traceId("poll-video") });
   }
+  if (resource === "video" && operation === "import-url") {
+    const [url, ...extra] = rest;
+    if (!url || extra.length > 0) throw new Error("video import-url requires exactly one URL.");
+    if (url.startsWith("--")) throw new Error(`Unknown video import-url option: ${url}`);
+    return (await getClient().importVideoFromUrl(url, { traceId: traceId("import-video") })).body;
+  }
   if (resource === "video" && operation === "list") {
     const options = parseListOptions(rest);
     return (await getClient().listVideos({
@@ -122,6 +130,58 @@ export async function runGrowthStudioCommand(args, context = {}) {
       ...toPdpPollingOptions(options),
     });
   }
+  if (resource === "viral-clone" && operation === "create") {
+    const options = asViralCloneParse(() => parsePdpCreateOptions(rest, "viral-clone create"));
+    if (!options.payloadPath) throw new Error("viral-clone create requires --payload <path>.");
+    if (options.dryRun && options.confirmBillable) {
+      throw new Error("viral-clone create accepts either --dry-run or --confirm-billable, not both.");
+    }
+    if (options.dryRun && hasPdpExecutionOptions(options)) {
+      throw new Error("viral-clone create --dry-run does not accept job or polling options.");
+    }
+    if (!options.dryRun && !options.confirmBillable) {
+      throw new Error("viral-clone create requires --confirm-billable for a live submission.");
+    }
+
+    const payload = await readJsonFile(resolveContextPath(context, options.payloadPath));
+    if (options.dryRun) return describeViralCloneDryRun(payload);
+    return runViralCloneJob(getClient(), payload, {
+      ...toPdpJobOptions(options, context),
+      traceId: traceId("viral-clone-job"),
+    });
+  }
+  if (resource === "viral-clone" && operation === "get") {
+    const [runId, ...extra] = rest;
+    if (!runId || extra.length > 0) throw new Error("viral-clone get requires exactly one run_id.");
+    assertRunId(runId);
+    return (await getClient().getViralCloneRun(runId, { traceId: traceId("get-viral-clone") })).body;
+  }
+  if (resource === "viral-clone" && operation === "poll") {
+    const options = asViralCloneParse(() => parsePdpTargetAndTimingOptions(rest, "poll", "runId", "run_id", "viral-clone"));
+    assertRunId(options.runId);
+    return getClient().pollViralCloneRun(options.runId, toPdpPollingOptions(options, "poll-viral-clone"));
+  }
+  if (resource === "viral-clone" && operation === "resume") {
+    const options = asViralCloneParse(() => parsePdpTargetAndTimingOptions(rest, "resume", "jobDirectory", "job directory", "viral-clone"));
+    const jobDirectory = resolveContextPath(context, options.jobDirectory);
+    const resumeClient = getContextClientValue(context) ?? createDeferredResumeClient(getClient);
+    return (context.resumeGrowthStudioJob ?? resumeGrowthStudioJob)(resumeClient, jobDirectory, {
+      expectedWorkflow: "viral-clone",
+      ...toPdpPollingOptions(options),
+    });
+  }
+  if (resource === "models" && operation === "list") {
+    if (rest.length > 0) throw new Error("models list does not accept arguments.");
+    return (await getClient().listModels({ traceId: traceId("list-models") })).body;
+  }
+  if (resource === "images" && operation === "list") {
+    const options = parseOffsetLimitOptions(rest, "images list");
+    return (await getClient().listImages({ ...options, traceId: traceId("list-images") })).body;
+  }
+  if (resource === "wallet" && operation === "discount") {
+    if (rest.length > 0) throw new Error("wallet discount does not accept arguments.");
+    return (await getClient().getWalletDiscount({ traceId: traceId("wallet-discount") })).body;
+  }
   if (resource === "wallet" && operation === "balance") {
     if (rest.length > 0) throw new Error("wallet balance does not accept arguments.");
     return (await getClient().getWalletBalance({ traceId: traceId("wallet-balance") })).body;
@@ -164,7 +224,8 @@ export function getGrowthStudioHelp() {
   pixverse-api growth-studio video create-from-json <payload.json> [folder options]
   pixverse-api growth-studio video status <video_id>
   pixverse-api growth-studio video poll <video_id>
-  pixverse-api growth-studio video list [--limit 20] [--status succeeded] [--cursor <cursor>]
+  pixverse-api growth-studio video list [--limit 20] [--status succeeded] [--cursor <cursor>] [--kind uploaded]
+  pixverse-api growth-studio video import-url <public-mp4-url>
   pixverse-api growth-studio video edit <video_id> <clip_index> <instruction>
   pixverse-api growth-studio run-job --payload <payload.json> [job options]
   pixverse-api growth-studio resume <job-directory> [polling options]
@@ -177,8 +238,23 @@ PDP video:
   pixverse-api growth-studio pdp resume <job-directory> [polling options]
   PDP create is billable and requires --confirm-billable for live submission.
 
+Viral Clone:
+  pixverse-api growth-studio video import-url <public-mp4-url>
+  pixverse-api growth-studio viral-clone create --payload <viral-clone.json> --dry-run
+  pixverse-api growth-studio viral-clone create --payload <viral-clone.json> --confirm-billable [job options]
+  pixverse-api growth-studio viral-clone get <run_id>
+  pixverse-api growth-studio viral-clone poll <run_id> [polling options]
+  pixverse-api growth-studio viral-clone resume <job-directory> [polling options]
+  Viral Clone create is billable and requires --confirm-billable for live submission.
+  video import-url is free but is sent once and never retried.
+
+Catalog and images (read-only; undocumented — observed live 2026-10-23):
+  pixverse-api growth-studio models list
+  pixverse-api growth-studio images list [--offset 0] [--limit 20]
+
 Wallet (read-only):
   pixverse-api growth-studio wallet balance
+  pixverse-api growth-studio wallet discount
   pixverse-api growth-studio wallet ledgers [--offset 0] [--limit 20]`;
 }
 
@@ -193,6 +269,9 @@ function createDeferredResumeClient(getClient) {
   return Object.freeze({
     pollVideo(...args) {
       return getClient().pollVideo(...args);
+    },
+    pollViralCloneRun(...args) {
+      return getClient().pollViralCloneRun(...args);
     },
   });
 }
@@ -296,12 +375,16 @@ function parseListOptions(args) {
     }
     else if (arg === "--status") options.status = readOptionValue(args, ++index, arg);
     else if (arg === "--cursor") options.cursor = readOptionValue(args, ++index, arg);
+    else if (arg === "--kind") {
+      options.kind = readOptionValue(args, ++index, arg);
+      if (options.kind !== "uploaded") throw new Error("--kind accepts only: uploaded.");
+    }
     else throw new Error(`Unknown video list option: ${arg}`);
   }
   return options;
 }
 
-function parsePdpCreateOptions(args) {
+function parsePdpCreateOptions(args, command = "pdp create") {
   let options = {};
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -339,7 +422,7 @@ function parsePdpCreateOptions(args) {
     } else if (arg === "--no-poll") {
       options = addUniqueOption(options, "noPoll", true, arg);
     } else {
-      throw new Error(`Unknown pdp create option: ${arg}`);
+      throw new Error(`Unknown ${command} option: ${arg}`);
     }
   }
   return options;
@@ -353,7 +436,7 @@ function parsePdpResumeOptions(args) {
   return parsePdpTargetAndTimingOptions(args, "resume", "jobDirectory", "job directory");
 }
 
-function parsePdpTargetAndTimingOptions(args, command, targetKey, targetLabel) {
+function parsePdpTargetAndTimingOptions(args, command, targetKey, targetLabel, resource = "pdp") {
   let options = {};
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -379,26 +462,30 @@ function parsePdpTargetAndTimingOptions(args, command, targetKey, targetLabel) {
         { minimum: 0, scale: 1_000 },
       ), arg);
     } else if (arg.startsWith("--")) {
-      throw new Error(`Unknown pdp ${command} option: ${arg}`);
+      throw new Error(`Unknown ${resource} ${command} option: ${arg}`);
     } else if (!Object.hasOwn(options, targetKey)) {
       options = { ...options, [targetKey]: arg };
     } else {
-      throw new Error(`pdp ${command} requires exactly one ${targetLabel}.`);
+      throw new Error(`${resource} ${command} requires exactly one ${targetLabel}.`);
     }
   }
-  if (!options[targetKey]) throw new Error(`pdp ${command} requires exactly one ${targetLabel}.`);
+  if (!options[targetKey]) throw new Error(`${resource} ${command} requires exactly one ${targetLabel}.`);
   return options;
 }
 
 function parseWalletLedgerOptions(args) {
+  return parseOffsetLimitOptions(args, "wallet ledgers");
+}
+
+function parseOffsetLimitOptions(args, command) {
   let options = { offset: 0, limit: 20 };
   const seen = new Set();
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg !== "--offset" && arg !== "--limit") {
-      throw new Error(`Unknown wallet ledgers option: ${arg}`);
+      throw new Error(`Unknown ${command} option: ${arg}`);
     }
-    if (seen.has(arg)) throw new Error(`Duplicate wallet ledgers option: ${arg}`);
+    if (seen.has(arg)) throw new Error(`Duplicate ${command} option: ${arg}`);
     seen.add(arg);
     const constraints = arg === "--offset"
       ? { minimum: 0 }
@@ -490,6 +577,17 @@ function readOptionValue(args, index, optionName) {
   const value = args[index];
   if (!value || value.startsWith("--")) throw new Error(`${optionName} requires a value.`);
   return value;
+}
+
+function asViralCloneParse(parse) {
+  try {
+    return parse();
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Duplicate pdp option:")) {
+      error.message = error.message.replace("Duplicate pdp option:", "Duplicate viral-clone option:");
+    }
+    throw error;
+  }
 }
 
 function addUniqueOption(options, key, value, optionName) {
