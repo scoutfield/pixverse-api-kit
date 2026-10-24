@@ -1,6 +1,6 @@
 ---
 name: pixverse-growth-studio-api
-description: Use for PixVerse Growth Studio OpenAPI product-video work, including seller-neutral PDP videos for fashion or apparel, product-page videos, uploads, folders, wallet reads, polling, and durable recovery. Do not use for Platform API or the PixVerse web CLI.
+description: Use for PixVerse Growth Studio OpenAPI product-video work, including seller-neutral PDP videos for fashion or apparel, Viral Clone remakes of an imported reference video, product-page videos, video URL imports, uploads, folders, wallet reads, polling, and durable recovery. Do not use for Platform API or the PixVerse web CLI.
 ---
 
 # PixVerse Growth Studio API
@@ -9,10 +9,12 @@ Use the local `pixverse-api growth-studio ...` CLI from this repository. It keep
 
 ## Route the Request
 
+- Start at the [Growth Studio Overview](../../../docs/api/growth-studio-overview.md) for every route (public guide vs. undocumented), the create-path comparison, and billing rules.
 - For a PDP or product-detail-page video, read [the PDP workflow](references/pdp-workflow.md), then copy and edit [the public PDP payload](references/pdp-payload.json). PDP is seller-neutral but currently limited to fashion/apparel products.
 - For the existing URL-based product-video workflow, start from [the product URL payload](references/product-url-payload.json) and use `growth-studio run-job` when durable recovery is needed.
 - Use the upload, folder, avatar, video, and wallet commands directly for read-only or supporting operations.
 - For complete PDP fields and command options, see the repository's [Growth Studio PDP API guide](../../../docs/api/growth-studio-pdp.md).
+- For a Viral Clone remake of a reference video, import the reference with `growth-studio video import-url`, copy [the Viral Clone payload](references/viral-clone-payload.json), and follow the [Growth Studio Viral Clone guide](../../../docs/api/growth-studio-viral-clone.md).
 
 PDP and URL-based video generation are separate workflows. PDP accepts uploaded PixVerse image URLs; it does not accept a merchant page URL, folder fields, arbitrary metadata, or a routing discriminator. Its create route is `POST /openapi/v1/ecommerce_pdp/video`; do not fall back to the general video-create route.
 
@@ -37,7 +39,7 @@ A non-loopback custom origin must be HTTPS, explicitly enabled with `PIXVERSE_GR
 - A successful PDP `--dry-run` loads no credentials, sends no network request, and creates no job artifacts.
 - Treat a PDP `202 Accepted` response as charged and queued, not completed. Submit once, then poll or resume.
 - PDP has no completion callback. Wait five seconds before the first status read, then poll the returned video resource and honor `Retry-After` while it is queued or processing.
-- Preserve `video_id`, `ledger_source_id`, `ledger_id`, folder IDs, and monetary amounts as strings.
+- Preserve `video_id`, `run_id`, `ledger_source_id`, `ledger_id`, folder IDs, and monetary amounts as strings.
 - After a timeout or connection loss, use saved artifacts and status or ledger reads to reconcile. Do not use create as a recovery operation.
 - Respect `Retry-After` for safe read-only polling rather than using tight loops.
 
@@ -55,6 +57,37 @@ npm run cli -- growth-studio wallet ledgers --offset 0 --limit 20
 ```
 
 Do not infer authorization from a prior dry run or wallet check. Follow [the PDP workflow](references/pdp-workflow.md) for the approval boundary, one-submit rule, artifacts, entitlement errors, and reconciliation.
+
+## Viral Clone Commands
+
+```bash
+npm run cli -- growth-studio video import-url https://cdn.example.test/reference.mp4
+npm run cli -- growth-studio video list --kind uploaded
+npm run cli -- growth-studio viral-clone create --payload /absolute/path/viral-clone.json --dry-run
+npm run cli -- growth-studio wallet discount
+npm run cli -- growth-studio viral-clone create --payload /absolute/path/viral-clone.json --confirm-billable
+npm run cli -- growth-studio viral-clone get <run_id>
+npm run cli -- growth-studio viral-clone poll <run_id>
+npm run cli -- growth-studio viral-clone resume /absolute/path/jobs/<job-dir>
+```
+
+- `video import-url` is free and synchronous but has no idempotency key; it is sent once and never retried. A lost response may still have created an asset, so check `video list --kind uploaded` first. Only `kind=uploaded` is accepted as a list filter.
+- Viral Clone create (`POST /openapi/v1/viral-clone/runs`) is billable, single-submit, and gated by `--dry-run` / `--confirm-billable` like PDP. `run_id` is a short decimal string; keep it as a string.
+- Duration, voiceover, and captions are server-managed; the payload rejects `video.duration_seconds`, `video.voiceover`, and `video.captions`. A reference too short for the model is rejected with `400 INVALID_REQUEST`.
+- Poll every five seconds after an initial five-second wait; `succeeded` and `failed` are terminal. `RUN_NOT_FOUND` (404) is not retried.
+- The run result has no `video_id`. The output also appears in `video list` as `kind: "creation"`, with `ledger_source_id` equal to its own `video_id`.
+- Pricing: free allowance first, then the discount from `wallet discount` (workspace before account). Video `price` is pre-discount integer cents; ledger amounts are signed decimal strings. Refunds return the amount actually charged. Fully free runs create no ledger entry. Reconcile by matching ledger `source_type: "video"` and string `source_id` with the video's `ledger_source_id`.
+
+Viral Clone jobs write `request.json`, `create-response.json`, `run-id.json`, `polling.jsonl`, `final.json`, and `error.json`. Resume never re-creates; without `run-id.json` it returns `reconciliation_required`.
+
+## Catalog and Image Reads (undocumented — observed live 2026-10-23)
+
+```bash
+npm run cli -- growth-studio models list
+npm run cli -- growth-studio images list --offset 0 --limit 20
+```
+
+Both are read-only and not in the official guide. `models list` passes the model catalog through unchanged; its price units (`price_unit`, `credit_rate_micro`) are unexplained, so never present them as a price quote. `images list` uses offset pagination (CLI bounds: offset >= 0, limit 1–100; server bounds unverified) and returns string `image_id` and `task_id`. There is no single-image get route.
 
 ## Existing URL-Based Workflow
 

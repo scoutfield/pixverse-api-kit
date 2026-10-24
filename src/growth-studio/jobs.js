@@ -10,8 +10,15 @@ import { serializeError } from "../core/errors.js";
 import { redact } from "../core/redaction.js";
 import { resolveFolderForPayload } from "./folders.js";
 import { PDP_CREATE_PATH, normalizePdpPayload } from "./pdp.js";
+import {
+  VIRAL_CLONE_CREATE_PATH,
+  normalizeViralClonePayload,
+  readRunIdentifier,
+  runIdFromLocation,
+} from "./viral-clone.js";
 
 const DEFAULT_JOBS_DIR = "jobs";
+const VIRAL_CLONE_WORKFLOW = "viral-clone";
 
 export async function runVideoJob(client, payload, options = {}) {
   const jobDir = await createJobDir(options.jobsDir || DEFAULT_JOBS_DIR, options.jobName);
@@ -55,11 +62,109 @@ export async function runPdpJob(client, publicPayload, options = {}) {
   }, (requestOptions) => client.createPdpVideo(submissionPayload, requestOptions));
 }
 
+// Viral Clone create is billable, has no idempotency key, and is submitted exactly
+// once. Durable artifacts: request.json, create-response.json, run-id.json,
+// polling.jsonl, final.json, and error.json.
+export async function runViralCloneJob(client, publicPayload, options = {}) {
+  const wirePayload = normalizeViralClonePayload(publicPayload);
+  const jobDir = await createJobDir(options.jobsDir || DEFAULT_JOBS_DIR, options.jobName);
+  const traceBase = options.traceId ?? path.basename(jobDir);
+
+  try {
+    await writeArtifact(jobDir, "request.json", redact({
+      provider: "growth-studio",
+      workflow: VIRAL_CLONE_WORKFLOW,
+      endpoint: VIRAL_CLONE_CREATE_PATH,
+      trace_id: traceBase,
+      created_at: new Date().toISOString(),
+      payload: wirePayload,
+    }));
+    const createResult = await client.createViralCloneRun(wirePayload, { traceId: `${traceBase}-create` });
+    await writeArtifact(jobDir, "create-response.json", redact(createResult.body));
+
+    const runId = readRunIdentifier(createResult.body?.run_id)
+      ?? runIdFromLocation(createResult.headers?.get?.("location"));
+    if (runId === undefined) throw new Error("Viral Clone create response did not include a decimal run_id.");
+    await writeArtifact(jobDir, "run-id.json", { run_id: runId });
+
+    if (options.poll === false) {
+      await writeArtifact(jobDir, "final.json", redact(createResult.body));
+      return viralCloneResult(jobDir, runId, { ...createResult.body, run_id: runId });
+    }
+    const final = await pollKnownViralCloneRun(client, jobDir, runId, traceBase, options);
+    return viralCloneResult(jobDir, runId, final);
+  } catch (error) {
+    await persistFailure(jobDir, error, traceBase);
+    throw error;
+  }
+}
+
+export async function resumeViralCloneJob(client, jobDirectory, options = {}) {
+  const jobDir = path.resolve(jobDirectory);
+  const request = await readJsonArtifact(path.join(jobDir, "request.json"), { rootDir: jobDir });
+  if (request.workflow !== VIRAL_CLONE_WORKFLOW) {
+    throw new Error(`Growth Studio job is not a ${VIRAL_CLONE_WORKFLOW} workflow.`);
+  }
+  return resumeKnownViralCloneJob(client, jobDir, request, options);
+}
+
+async function resumeKnownViralCloneJob(client, jobDir, request, options) {
+  const runId = readRunIdentifier((await readOptionalArtifact(jobDir, "run-id.json"))?.run_id);
+  if (runId === undefined) return reconciliationResult(jobDir, request);
+
+  const completed = await readOptionalArtifact(jobDir, "final.json");
+  if (completed && isViralCloneTerminal(completed.status)) return viralCloneResult(jobDir, runId, completed);
+  if (completed) await archivePriorFinal(jobDir);
+
+  try {
+    const final = await pollKnownViralCloneRun(client, jobDir, runId, request.trace_id, options);
+    return viralCloneResult(jobDir, runId, final);
+  } catch (error) {
+    await persistFailure(jobDir, error, request.trace_id, { preserveExisting: true });
+    throw error;
+  }
+}
+
+async function pollKnownViralCloneRun(client, jobDir, runId, traceBase, options) {
+  const final = await client.pollViralCloneRun(runId, {
+    traceId: `${traceBase}-poll`,
+    timeoutMs: options.timeoutMs,
+    initialDelaySeconds: options.initialDelaySeconds,
+    fallbackDelaySeconds: options.fallbackDelaySeconds,
+    onSnapshot: async (snapshot) => {
+      await appendJsonLineArtifact(path.join(jobDir, "polling.jsonl"), redact(snapshot), { rootDir: jobDir });
+    },
+  });
+  await writeArtifact(jobDir, "final.json", redact(final));
+  return final;
+}
+
+function viralCloneResult(jobDir, runId, final) {
+  return {
+    job_dir: jobDir,
+    workflow: VIRAL_CLONE_WORKFLOW,
+    run_id: runId,
+    status: final.status,
+    video_url: final.output?.video_url,
+    thumbnail_url: final.output?.thumbnail_url,
+    mime_type: final.output?.mime_type,
+    ...(final.error === undefined ? {} : { error: final.error }),
+    request_id: final.request_id,
+  };
+}
+
+function isViralCloneTerminal(status) {
+  return status === "succeeded" || status === "failed";
+}
+
 export async function resumeGrowthStudioJob(client, jobDirectory, options = {}) {
   const jobDir = path.resolve(jobDirectory);
   const request = await readJsonArtifact(path.join(jobDir, "request.json"), { rootDir: jobDir });
   if (options.expectedWorkflow && request.workflow !== options.expectedWorkflow) {
     throw new Error(`Growth Studio job is not a ${options.expectedWorkflow} workflow.`);
+  }
+  if (request.workflow === VIRAL_CLONE_WORKFLOW) {
+    return resumeKnownViralCloneJob(client, jobDir, request, options);
   }
 
   const ledgerSourceId = await readSavedLedgerSourceId(jobDir);

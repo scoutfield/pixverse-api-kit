@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { normalizePdpPayload } from "../src/growth-studio/pdp.js";
+import { normalizeViralClonePayload } from "../src/growth-studio/viral-clone.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SKILL_ROOT = path.join(ROOT, ".agents/skills/pixverse-growth-studio-api");
@@ -13,6 +14,8 @@ const PUBLIC_DOCS = [
   "docs/api/command-reference.md",
   "docs/api/safety-and-recovery.md",
   "docs/api/growth-studio-pdp.md",
+  "docs/api/growth-studio-viral-clone.md",
+  "docs/api/growth-studio-overview.md",
 ];
 
 async function read(relativePath) {
@@ -147,5 +150,53 @@ test("local links in the changed public documentation resolve inside the reposit
       assert.equal(resolved.startsWith(`${ROOT}${path.sep}`), true);
       await fs.access(resolved);
     }
+  }
+});
+
+test("Viral Clone payload references are neutral, identical, and accepted by the normalizer", async () => {
+  const raw = await readSkill("references/viral-clone-payload.json");
+  const example = await read("packaging/customer-plugin/plugin/examples/viral-clone-plus.json");
+  assert.equal(example, raw);
+  const payload = JSON.parse(raw);
+  assert.deepEqual(normalizeViralClonePayload(payload), payload);
+  assert.equal(typeof payload.source_video_id, "string");
+  assert.equal(payload.video.duration_seconds, undefined);
+  assert.doesNotMatch(raw, /revolve|lioness|amazon|shopify|feishu\.cn/i);
+  assert.doesNotMatch(raw, /api[_-]?key|bearer\s|mh_live_/i);
+});
+
+test("Viral Clone, import, and overview documentation states the safety contract", async () => {
+  const skill = await readSkill("SKILL.md");
+  const guide = await read("docs/api/growth-studio-viral-clone.md");
+  const overview = await read("docs/api/growth-studio-overview.md");
+  const commandReference = await read("docs/api/command-reference.md");
+  const readme = await read("README.md");
+  const pluginSkill = await read("packaging/customer-plugin/plugin/skills/growth-studio/SKILL.md");
+
+  for (const text of [skill, pluginSkill, commandReference]) {
+    for (const command of ["viral-clone create", "--confirm-billable", "video import-url", "wallet discount", "models list", "images list"]) {
+      assert.ok(text.includes(command), `missing ${command}`);
+    }
+    assert.match(text, /undocumented/i);
+  }
+  for (const text of [skill, pluginSkill, guide, readme]) {
+    assert.match(text, /ledger_source_id/);
+    assert.match(text, /pre-discount integer cents/);
+  }
+  assert.match(guide, /\/openapi\/v1\/viral-clone\/runs/);
+  assert.match(guide, /run-id\.json/);
+  assert.match(guide, /reconciliation_required/);
+  assert.match(guide, /never retr/i);
+  assert.match(guide, /server-managed/);
+  assert.match(guide, /RUN_NOT_FOUND/);
+  assert.match(guide, /CONCURRENCY_LIMIT_EXCEEDED/);
+  assert.match(guide, /UPLOAD_FAILED/);
+  assert.match(overview, /https:\/\/docs\.pixverse\.ai\/growth-studio-openapi-integration-guide/);
+  assert.match(overview, /Undocumented — observed live 2026-10-23/);
+  for (const route of ["/avatars", "/image/upload", "/videos/{video_id}/edit", "/folders", "/viral-clone/runs/{run_id}", "/video/upload", "/wallet/discount", "/wallet/ledgers", "/ecommerce_pdp/video", "/wallet/balance", "/models", "/images", "/ka/videos"]) {
+    assert.ok(overview.includes(route), `overview missing ${route}`);
+  }
+  for (const text of [readme, commandReference, await read("docs/api/growth-studio-pdp.md"), guide, skill, pluginSkill]) {
+    assert.match(text, /growth-studio-overview\.md/);
   }
 });

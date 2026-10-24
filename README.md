@@ -3,7 +3,7 @@
 Agent-safe PixVerse API tools for two dedicated server-side APIs:
 
 - **Platform API** — discovery, uploads, image/video generation, editing, agents, account reads, status, webhooks, and durable recovery.
-- **Growth Studio API** — PDP product videos, uploads, folders, wallet reads, product-page workflows, polling, and durable recovery.
+- **Growth Studio API** — PDP product videos, Viral Clone remakes, video URL imports, uploads, folders, wallet reads, product-page workflows, polling, and durable recovery.
 
 The installed command is `pixverse-api`. It is separate from the public PixVerse web CLI named `pixverse`.
 
@@ -221,7 +221,12 @@ pixverse-api growth-studio folders list
 pixverse-api growth-studio folders ensure "Campaign Alpha"
 pixverse-api growth-studio upload image /absolute/path/product.webp
 pixverse-api growth-studio pdp create --payload /absolute/path/pdp.json --dry-run
+pixverse-api growth-studio video import-url https://cdn.example.com/reference.mp4
+pixverse-api growth-studio viral-clone create --payload /absolute/path/viral-clone.json --dry-run
 pixverse-api growth-studio wallet balance
+pixverse-api growth-studio wallet discount
+pixverse-api growth-studio models list   # undocumented — observed live 2026-10-23
+pixverse-api growth-studio images list   # undocumented — observed live 2026-10-23
 pixverse-api growth-studio video create-from-url "https://shop.example.com/products/item"
 pixverse-api growth-studio video create-from-json /absolute/path/payload.json
 pixverse-api growth-studio run-job --payload /absolute/path/payload.json --folder-name "Campaign Alpha"
@@ -230,6 +235,10 @@ pixverse-api growth-studio video poll 627410861853514292
 ```
 
 PDP is the merchant-neutral product-detail-page video workflow for the currently supported fashion/apparel category. It uses uploaded PixVerse image URLs, has a credential-free `--dry-run`, and requires explicit approval immediately before a live `--confirm-billable` submission. A live create is submitted once and recorded durably. See [`docs/api/growth-studio-pdp.md`](docs/api/growth-studio-pdp.md).
+
+Viral Clone remakes an imported reference video for a product listing. Import the reference once with `video import-url` (free, never retried), validate with `viral-clone create --dry-run`, and submit once with `--confirm-billable`. The run is polled by its string `run_id`; `viral-clone resume` never re-creates. Video `price` fields are pre-discount integer cents, while wallet ledger amounts are decimal strings; reconcile by matching ledger `source_type`/`source_id` to a video's `ledger_source_type`/`ledger_source_id`. See [`docs/api/growth-studio-viral-clone.md`](docs/api/growth-studio-viral-clone.md).
+
+The single Growth Studio entry point, with every route, its source (public guide or observed live), retry policy, and billing rules, is [`docs/api/growth-studio-overview.md`](docs/api/growth-studio-overview.md).
 
 Legacy Growth Studio aliases such as `get`, `poll`, `run-job`, and `create-from-url` still work during `0.x` and emit one deprecation warning.
 
@@ -312,7 +321,9 @@ PIXVERSE_API_SKIP_PIXVERSE_PREFIX=1 zsh ./install.command
 ## Docs
 
 - `docs/api/command-reference.md`
+- `docs/api/growth-studio-overview.md`
 - `docs/api/growth-studio-pdp.md`
+- `docs/api/growth-studio-viral-clone.md`
 - `docs/api/platform-operations.md`
 - `docs/api/safety-and-recovery.md`
 - `.agents/skills/pixverse-api/SKILL.md`
@@ -321,4 +332,4 @@ PIXVERSE_API_SKIP_PIXVERSE_PREFIX=1 zsh ./install.command
 
 ## Job Artifacts
 
-Platform `run-job` writes under `pixverse-api-jobs/platform/` by default. Platform default waiting writes polling snapshots and `final.json`; Platform `--no-wait` writes the accepted request and known ID for later `resume`. Growth Studio `run-job` and live PDP create write under `jobs/` by default. Both providers preserve redacted request evidence, known IDs, polling snapshots, final state, and safe error records. PDP can additionally preserve `ledger-source-id.json`. Use the matching provider or PDP `resume` command with that job directory to continue polling without submitting another generation.
+Platform `run-job` writes under `pixverse-api-jobs/platform/` by default. Platform default waiting writes polling snapshots and `final.json`; Platform `--no-wait` writes the accepted request and known ID for later `resume`. Growth Studio `run-job` and live PDP create write under `jobs/` by default. Both providers preserve redacted request evidence, known IDs, polling snapshots, final state, and safe error records. PDP can additionally preserve `ledger-source-id.json`; Viral Clone preserves `run-id.json`. Use the matching provider or PDP `resume` command with that job directory to continue polling without submitting another generation.

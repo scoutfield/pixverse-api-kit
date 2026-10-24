@@ -43,6 +43,10 @@ test("staging creates the self-contained marketplace from approved sources", asy
   assert.equal(await exists(path.join(result.pluginRoot, ".claude-plugin/plugin.json")), true);
   assert.equal(await exists(path.join(result.pluginRoot, "skills/platform/references/platform-operations.md")), true);
   assert.equal(await exists(path.join(result.pluginRoot, "skills/growth-studio/references/pdp-standard-high.json")), true);
+  assert.equal(await exists(path.join(result.pluginRoot, "skills/growth-studio/references/viral-clone-plus.json")), true);
+  assert.equal(await exists(path.join(result.pluginRoot, "skills/growth-studio/references/growth-studio-viral-clone.md")), true);
+  assert.equal(await exists(path.join(result.pluginRoot, "skills/growth-studio/references/growth-studio-overview.md")), true);
+  assert.equal(await exists(path.join(result.pluginRoot, "runtime/src/growth-studio/viral-clone.js")), true);
   assert.deepEqual(
     [...new Set(result.files.filter((file) => file.startsWith("agent-skills/")).map((file) => file.split("/")[1]))],
     ["pixverse-api-growth-studio", "pixverse-api-platform", "pixverse-api-start"],
