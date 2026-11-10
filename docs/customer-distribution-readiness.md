@@ -129,7 +129,7 @@ examples/README.md
 
 ## Versioning recommendation
 
-The current `0.3.0-beta.3` version should remain an internal/private beta version until the customer distribution repository and release gates are complete.
+The current `0.3.0-beta.4` version should remain an internal/private beta version until the customer distribution repository and release gates are complete.
 
 Promote to `1.0.0` only after stabilizing:
 

@@ -1,11 +1,25 @@
 ---
 name: pixverse-growth-studio-api
-description: Use for PixVerse Growth Studio OpenAPI product-video work, including seller-neutral PDP videos for fashion or apparel, product-page videos, uploads, folders, wallet reads, polling, and durable recovery. Do not use for Platform API or the PixVerse web CLI.
+description: Use PixVerse Growth Studio OpenAPI for product and template videos, Viral Clone, Video Variations, Product Image Suites, uploads, wallet discounts and ledgers, legacy PDP, polling, and durable recovery.
 ---
 
 # PixVerse Growth Studio API
 
 Use the local `pixverse-api growth-studio ...` CLI from this repository. It keeps the Growth Studio key server-side and records durable evidence for billable jobs.
+
+## Current public workflows (November 2026)
+
+Read [the public workflow guide](references/growth-studio-workflows.md) before using the new commands. Use `growth-studio templates list` to choose a live template; `template create`, `viral-clone create`, `variation create`, and `product-suite create` take `--payload <file>` and either `--dry-run` or `--confirm-billable`. Obtain explicit approval immediately before a billable submission. Every create is durable and submitted once.
+
+- `upload video <public-mp4-url>` imports synchronously and is free; never repeat an ambiguous import automatically.
+- `template get/poll` uses `video_id`; `viral-clone get/poll` uses `run_id`; `product-suite get/poll` uses `task_id`.
+- `variation get/poll` follows one video ID. `variation resume <job-dir>` follows every saved ID and preserves `input_indices` and the batch ledger ID.
+- Each workflow supports `resume <job-dir>`, which never creates anything. Missing IDs require reconciliation.
+- Product Image Suite `completed` and variation batch `completed` do not mean all outputs succeeded. Inspect every image/video status and retain failure details.
+- `wallet discount` reads the percentage payable. Ledgers are the source of truth for actual charges; catalog milli-credits, video US cents, and ledger decimal currency strings are different units.
+- `video list --kind template|variation|hook|uploaded` filters the list. Preserve filters and the opaque cursor while paging.
+
+PDP and `wallet balance` are legacy capabilities absent from the current public guide; retain them for existing integrations without assuming current entitlement. Do not use internal web-session routes or web-login credentials.
 
 ## Route the Request
 

@@ -52,6 +52,9 @@ export function validateFolderPayload(payload) {
 }
 
 export function validateListVideosOptions(options = {}) {
+  if (options.kind !== undefined && !["template", "variation", "hook", "uploaded"].includes(options.kind)) {
+    throw new Error("kind must be one of: template, variation, hook, uploaded.");
+  }
   if (options.limit !== undefined) {
     if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > MAX_LIST_LIMIT) {
       throw new Error(`limit must be an integer from 1 through ${MAX_LIST_LIMIT}.`);

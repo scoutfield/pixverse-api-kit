@@ -29,7 +29,7 @@ async function createExtractedPackage(t) {
   await execFileAsync("unzip", ["-q", archived.archivePath, "-d", extractRoot]);
   return {
     root,
-    packageRoot: path.join(extractRoot, "pixverse-api-plugin-0.3.0-beta.3"),
+    packageRoot: path.join(extractRoot, "pixverse-api-plugin-0.3.0-beta.4"),
   };
 }
 

@@ -9,7 +9,7 @@
       "name": "pixverse-api",
       "source": "./plugins/pixverse-api",
       "description": "Operate PixVerse Platform API and Growth Studio API workflows through a safe embedded CLI.",
-      "version": "0.3.0-beta.3",
+      "version": "0.3.0-beta.4",
       "category": "development"
     }
   ]

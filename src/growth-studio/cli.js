@@ -10,6 +10,8 @@ import {
 } from "./jobs.js";
 import { describePdpDryRun } from "./pdp.js";
 import { assertVideoId } from "./validation.js";
+import { WORKFLOWS, workflowSpec, assertResourceId, describeWorkflowDryRun, normalizeWorkflowPayload } from "./workflows.js";
+import { runWorkflowJob, resumeWorkflowJob } from "./workflow-jobs.js";
 
 export const GROWTH_STUDIO_LEGACY_COMMAND_MAPPINGS = Object.freeze({
   avatars: ["avatars", "list"],
@@ -32,6 +34,51 @@ export async function runGrowthStudioCommand(args, context = {}) {
     client ??= context.client || createClient(context);
     return client;
   };
+
+  if (resource === "templates" && operation === "list") {
+    if (rest.length) throw new Error("templates list does not accept arguments.");
+    return (await getClient().listVideoTemplates({ traceId: traceId("templates") })).body;
+  }
+  if (resource === "wallet" && operation === "discount") {
+    if (rest.length) throw new Error("wallet discount does not accept arguments.");
+    return (await getClient().getWalletDiscount({ traceId: traceId("discount") })).body;
+  }
+  if (resource === "upload" && operation === "video") {
+    const [url, ...flags] = rest;
+    if (!url || url.startsWith("--")) throw new Error("upload video requires a direct public video URL.");
+    const options = parsePdpCreateOptions(flags, "upload video");
+    if (Object.keys(options).some((key) => !["dryRun", "jobsDir", "jobName"].includes(key))) {
+      throw new Error("upload video accepts only --dry-run, --jobs-dir, and --job-name.");
+    }
+    if (options.dryRun && hasPdpExecutionOptions(options)) throw new Error("Dry run does not accept job options.");
+    const payload = normalizeWorkflowPayload("video-import", { url });
+    if (options.dryRun) return describeWorkflowDryRun("video-import", payload);
+    return runWorkflowJob(getClient(), "video-import", payload, toPdpJobOptions(options, context));
+  }
+  if (Object.hasOwn(WORKFLOWS, resource)) {
+    if (operation === "create" && resource !== "video-import") {
+      const options = parsePdpCreateOptions(rest, resource);
+      if (!options.payloadPath) throw new Error(`${resource} create requires --payload <path>.`);
+      if (options.dryRun === true && options.confirmBillable === true) throw new Error("Choose --dry-run or --confirm-billable, not both.");
+      if (!options.dryRun && !options.confirmBillable) throw new Error(`${resource} create requires --confirm-billable for live submission.`);
+      if (options.dryRun && hasPdpExecutionOptions(options)) throw new Error("Dry run does not accept job or polling options.");
+      const payload = normalizeWorkflowPayload(resource, await readJsonFile(resolveContextPath(context, options.payloadPath)));
+      if (options.dryRun) return describeWorkflowDryRun(resource, payload);
+      return runWorkflowJob(getClient(), resource, payload, toPdpJobOptions(options, context));
+    }
+    if (operation === "get" || operation === "poll") {
+      const options = parsePdpTargetAndTimingOptions(rest, operation, "id", workflowSpec(resource).id, resource);
+      if (operation === "get" && Object.keys(options).length !== 1) throw new Error(`${resource} get does not accept polling options.`);
+      assertResourceId(options.id, workflowSpec(resource).id);
+      if (operation === "get") return (await getClient().getWorkflow(resource, options.id, { traceId: traceId(resource) })).body;
+      return getClient().pollWorkflow(resource, options.id, toPdpPollingOptions(options, resource));
+    }
+    if (operation === "resume") {
+      const options = parsePdpTargetAndTimingOptions(rest, operation, "jobDirectory", "job directory", resource);
+      return resumeWorkflowJob(getClient, resource, resolveContextPath(context, options.jobDirectory), toPdpPollingOptions(options));
+    }
+    throw new Error(`Unknown ${resource} operation: ${operation}`);
+  }
 
   if (resource === "avatars" && operation === "list") {
     return (await getClient().listAvatars({ traceId: traceId("list-avatars") })).body;
@@ -178,14 +225,34 @@ PDP video:
   PDP create is billable and requires --confirm-billable for live submission.
 
 Wallet (read-only):
+  pixverse-api growth-studio wallet discount
   pixverse-api growth-studio wallet balance
-  pixverse-api growth-studio wallet ledgers [--offset 0] [--limit 20]`;
+  pixverse-api growth-studio wallet ledgers [--offset 0] [--limit 20]
+
+Current public workflows:
+  pixverse-api growth-studio upload video <public-mp4-url> [--dry-run] [--jobs-dir <dir>]
+  pixverse-api growth-studio templates list
+  pixverse-api growth-studio <workflow> create --payload <file.json> --dry-run
+  pixverse-api growth-studio <workflow> create --payload <file.json> --confirm-billable [job options]
+  pixverse-api growth-studio <workflow> get <id>
+  pixverse-api growth-studio <workflow> poll <id> [polling options]
+  pixverse-api growth-studio <workflow> resume <job-directory> [polling options]
+  Workflows: template (video_id), viral-clone (run_id), variation (individual video_id), product-suite (task_id).
+  Variation resume follows every saved video ID; completed does not mean all results succeeded.
+  Upload is synchronous and free; video-import resume recovers its saved asset without reimporting.
+  Job options: --jobs-dir <dir>, --job-name <name>, --no-poll, and polling options.
+  Polling options: --timeout-minutes <n>, --initial-delay-seconds <n>, --fallback-delay-seconds <n>.
+  New workflows wait at least 5 seconds and honor Retry-After. POST requests are never retried.
+  video list also accepts --kind template|variation|hook|uploaded (retain filters while paging).
+  PDP and wallet balance are retained legacy capabilities, absent from the current public guide.`;
 }
 
 function createClient(context) {
+  context.loadGrowthCredentials?.();
   const options = { ...getGrowthStudioConfig(context.env) };
   if (context.fetchImpl) options.fetchImpl = context.fetchImpl;
   if (context.sleep) options.sleep = context.sleep;
+  if (context.now) options.now = context.now;
   return new GrowthStudioClient(options);
 }
 
@@ -296,50 +363,52 @@ function parseListOptions(args) {
     }
     else if (arg === "--status") options.status = readOptionValue(args, ++index, arg);
     else if (arg === "--cursor") options.cursor = readOptionValue(args, ++index, arg);
+    else if (arg === "--kind") options.kind = readOptionValue(args, ++index, arg);
     else throw new Error(`Unknown video list option: ${arg}`);
   }
   return options;
 }
 
-function parsePdpCreateOptions(args) {
+function parsePdpCreateOptions(args, scope = "pdp") {
   let options = {};
+  const unique = (current, key, value, arg) => addUniqueOption(current, key, value, arg, scope);
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--payload") {
-      options = addUniqueOption(options, "payloadPath", readOptionValue(args, ++index, arg), arg);
+      options = unique(options, "payloadPath", readOptionValue(args, ++index, arg), arg);
     } else if (arg === "--dry-run") {
-      options = addUniqueOption(options, "dryRun", true, arg);
+      options = unique(options, "dryRun", true, arg);
     } else if (arg === "--confirm-billable") {
-      options = addUniqueOption(options, "confirmBillable", true, arg);
+      options = unique(options, "confirmBillable", true, arg);
     } else if (arg === "--jobs-dir") {
-      options = addUniqueOption(options, "jobsDir", readOptionValue(args, ++index, arg), arg);
+      options = unique(options, "jobsDir", readOptionValue(args, ++index, arg), arg);
     } else if (arg === "--job-name") {
-      options = addUniqueOption(options, "jobName", readOptionValue(args, ++index, arg), arg);
+      options = unique(options, "jobName", readOptionValue(args, ++index, arg), arg);
     } else if (arg === "--timeout-minutes") {
-      options = addUniqueOption(options, "timeoutMinutes", readPdpFiniteOption(
+      options = unique(options, "timeoutMinutes", readPdpFiniteOption(
         args,
         ++index,
         arg,
         { minimum: 0, exclusive: true, scale: 60_000 },
       ), arg);
     } else if (arg === "--initial-delay-seconds") {
-      options = addUniqueOption(options, "initialDelaySeconds", readPdpFiniteOption(
+      options = unique(options, "initialDelaySeconds", readPdpFiniteOption(
         args,
         ++index,
         arg,
         { minimum: 0, scale: 1_000 },
       ), arg);
     } else if (arg === "--fallback-delay-seconds") {
-      options = addUniqueOption(options, "fallbackDelaySeconds", readPdpFiniteOption(
+      options = unique(options, "fallbackDelaySeconds", readPdpFiniteOption(
         args,
         ++index,
         arg,
         { minimum: 0, scale: 1_000 },
       ), arg);
     } else if (arg === "--no-poll") {
-      options = addUniqueOption(options, "noPoll", true, arg);
+      options = unique(options, "noPoll", true, arg);
     } else {
-      throw new Error(`Unknown pdp create option: ${arg}`);
+      throw new Error(`Unknown ${scope} create option: ${arg}`);
     }
   }
   return options;
@@ -353,40 +422,41 @@ function parsePdpResumeOptions(args) {
   return parsePdpTargetAndTimingOptions(args, "resume", "jobDirectory", "job directory");
 }
 
-function parsePdpTargetAndTimingOptions(args, command, targetKey, targetLabel) {
+function parsePdpTargetAndTimingOptions(args, command, targetKey, targetLabel, scope = "pdp") {
   let options = {};
+  const unique = (current, key, value, arg) => addUniqueOption(current, key, value, arg, scope);
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--timeout-minutes") {
-      options = addUniqueOption(options, "timeoutMinutes", readPdpFiniteOption(
+      options = unique(options, "timeoutMinutes", readPdpFiniteOption(
         args,
         ++index,
         arg,
         { minimum: 0, exclusive: true, scale: 60_000 },
       ), arg);
     } else if (arg === "--initial-delay-seconds") {
-      options = addUniqueOption(options, "initialDelaySeconds", readPdpFiniteOption(
+      options = unique(options, "initialDelaySeconds", readPdpFiniteOption(
         args,
         ++index,
         arg,
         { minimum: 0, scale: 1_000 },
       ), arg);
     } else if (arg === "--fallback-delay-seconds") {
-      options = addUniqueOption(options, "fallbackDelaySeconds", readPdpFiniteOption(
+      options = unique(options, "fallbackDelaySeconds", readPdpFiniteOption(
         args,
         ++index,
         arg,
         { minimum: 0, scale: 1_000 },
       ), arg);
     } else if (arg.startsWith("--")) {
-      throw new Error(`Unknown pdp ${command} option: ${arg}`);
+      throw new Error(`Unknown ${scope} ${command} option: ${arg}`);
     } else if (!Object.hasOwn(options, targetKey)) {
       options = { ...options, [targetKey]: arg };
     } else {
-      throw new Error(`pdp ${command} requires exactly one ${targetLabel}.`);
+      throw new Error(`${scope} ${command} requires exactly one ${targetLabel}.`);
     }
   }
-  if (!options[targetKey]) throw new Error(`pdp ${command} requires exactly one ${targetLabel}.`);
+  if (!options[targetKey]) throw new Error(`${scope} ${command} requires exactly one ${targetLabel}.`);
   return options;
 }
 
@@ -402,7 +472,7 @@ function parseWalletLedgerOptions(args) {
     seen.add(arg);
     const constraints = arg === "--offset"
       ? { minimum: 0 }
-      : { minimum: 1, maximum: 100 };
+      : { minimum: 0, maximum: 100 };
     options = {
       ...options,
       [arg === "--offset" ? "offset" : "limit"]: readSafeIntegerOption(
@@ -492,8 +562,8 @@ function readOptionValue(args, index, optionName) {
   return value;
 }
 
-function addUniqueOption(options, key, value, optionName) {
-  if (Object.hasOwn(options, key)) throw new Error(`Duplicate pdp option: ${optionName}`);
+function addUniqueOption(options, key, value, optionName, scope = "pdp") {
+  if (Object.hasOwn(options, key)) throw new Error(`Duplicate ${scope} option: ${optionName}`);
   return { ...options, [key]: value };
 }
 

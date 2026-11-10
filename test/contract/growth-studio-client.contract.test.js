@@ -272,6 +272,7 @@ test("Growth Studio wallet methods preserve formatted strings and validated pagi
 
 test("wallet ledger options default to the documented safe page", () => {
   assert.deepEqual(normalizeWalletLedgerOptions(), { offset: 0, limit: 20 });
+  assert.deepEqual(normalizeWalletLedgerOptions({ limit: 0 }), { offset: 0, limit: 20 });
   assert.deepEqual(normalizeWalletLedgerOptions({ traceId: "wallet-fixture" }), {
     offset: 0,
     limit: 20,
@@ -293,7 +294,7 @@ test("wallet ledger options reject coercion, unsafe numbers, bounds, and unknown
     [{ offset: Number.MAX_SAFE_INTEGER + 1 }, /offset must be a safe integer/i],
     [{ limit: "10" }, /limit must be a safe integer/i],
     [{ limit: "-10" }, /limit must be a safe integer/i],
-    [{ limit: 0 }, /limit must be at least 1/i],
+    [{ limit: -1 }, /limit must be at least 0/i],
     [{ limit: 101 }, /limit must be at most 100/i],
     [{ limit: 2.5 }, /limit must be a safe integer/i],
     [{ limit: Number.NaN }, /limit must be a safe integer/i],

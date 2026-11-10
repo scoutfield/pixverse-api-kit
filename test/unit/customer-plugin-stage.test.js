@@ -104,8 +104,25 @@ test("staged CLI launches with Codex bundled Node when node is absent from PATH"
     encoding: "utf8",
   });
 
-  assert.equal(stdout, "0.3.0-beta.3\n");
+  assert.equal(stdout, "0.3.0-beta.4\n");
   assert.equal(stderr, "");
+});
+
+test("installed CLI shortcut resolves relative and absolute symlinks, including paths with spaces", async (t) => {
+  const stageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pixverse shortcut test "));
+  t.after(() => fs.rm(stageRoot, { recursive: true, force: true }));
+  const result = await stageCustomerPlugin({ repoRoot: process.cwd(), stageRoot, installDependencies: false });
+  const bin = path.join(stageRoot, "bin"); await fs.mkdir(bin);
+  const relative = path.join(bin, "pixverse-api");
+  await fs.symlink(path.relative(bin, path.join(result.packageRoot, "dist/index.js")), relative);
+  const absolute = path.join(bin, "absolute-link"); await fs.symlink(relative, absolute);
+  for (const executable of [relative, absolute]) {
+    const { stdout, stderr } = await execFileAsync(executable, ["--version"], {
+      env: { PATH: "/usr/bin:/bin", CODEX_MCP_NODE_PATH: process.execPath }, encoding: "utf8",
+    });
+    assert.equal(stdout, "0.3.0-beta.4\n");
+    assert.equal(stderr, "");
+  }
 });
 
 test("staged runtime metadata includes only production dependencies", async (t) => {

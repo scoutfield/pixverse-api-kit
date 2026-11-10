@@ -69,7 +69,7 @@ test("main prints the top-level version without loading either provider configur
 
   assert.equal(exitCode, 0);
   assert.equal(providerCalls, 0);
-  assert.equal(output.stdout(), "0.3.0-beta.3\n");
+  assert.equal(output.stdout(), "0.3.0-beta.4\n");
   assert.equal(output.stderr(), "");
 });
 

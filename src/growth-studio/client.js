@@ -10,6 +10,7 @@ import {
 } from "./validation.js";
 import { PDP_CREATE_ROUTE, normalizePdpPayload } from "./pdp.js";
 import { normalizeWalletLedgerOptions } from "./wallet.js";
+import { workflowSpec, assertResourceId, normalizeWorkflowPayload } from "./workflows.js";
 
 export {
   validateCreatePayload,
@@ -149,6 +150,52 @@ export class GrowthStudioClient {
     return this.request("GET", "/avatars", { traceId: options.traceId });
   }
 
+  async listVideoTemplates(options = {}) {
+    return this.request("GET", "/video-templates", { traceId: options.traceId });
+  }
+
+  async getWalletDiscount(options = {}) {
+    return this.request("GET", "/wallet/discount", { traceId: options.traceId });
+  }
+
+  async createWorkflow(name, payload, options = {}) {
+    const body = normalizeWorkflowPayload(name, payload);
+    return this.request("POST", workflowSpec(name).path, { json: body, traceId: options.traceId });
+  }
+
+  async getWorkflow(name, id, options = {}) {
+    const spec = workflowSpec(name);
+    assertResourceId(id, spec.id);
+    return this.request("GET", `${spec.readPath}/${encodeURIComponent(id)}`, { traceId: options.traceId });
+  }
+
+  async pollWorkflow(name, id, options = {}) {
+    const spec = workflowSpec(name);
+    assertResourceId(id, spec.id);
+    const deadline = this.now() + (options.timeoutMs ?? 30 * 60 * 1000);
+    let delay = Math.max(5, options.initialDelaySeconds ?? 5);
+    while (true) {
+      if (this.now() + delay * 1000 > deadline) throw new Error(`Polling timed out for ${spec.id} ${id}.`);
+      await this.sleep(delay * 1000);
+      let result;
+      try {
+        result = await this.getWorkflow(name, id, options);
+      } catch (error) {
+        if (!isRetryableReadError(error) || this.now() >= deadline) throw error;
+        delay = Math.max(5, error.retryAfter ?? options.fallbackDelaySeconds ?? 5);
+        continue;
+      }
+      await options.onSnapshot?.(result.body);
+      if (spec.terminal.includes(result.body.status)) return result.body;
+      if (!["queued", "processing"].includes(result.body.status)) {
+        throw new GrowthStudioApiError("Unexpected workflow status; retain the saved identifier and reconcile.", {
+          category: "protocol", code: "INVALID_RESOURCE_STATUS", requestId: result.requestId,
+        });
+      }
+      delay = Math.max(5, result.retryAfter ?? options.fallbackDelaySeconds ?? 5);
+    }
+  }
+
   async uploadImage(filePath, options = {}) {
     const type = UPLOAD_IMAGE_TYPES[path.extname(String(filePath)).toLowerCase()];
     if (!type) throw new Error("upload image accepts only .jpg, .jpeg, .png, or .webp files.");
@@ -209,6 +256,7 @@ export class GrowthStudioClient {
         limit: options.limit,
         status: options.status,
         cursor: options.cursor,
+        kind: options.kind,
       },
       traceId: options.traceId,
     });

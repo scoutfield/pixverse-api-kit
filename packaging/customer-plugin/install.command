@@ -4,7 +4,7 @@ set -euo pipefail
 PLUGIN_NAME="pixverse-api"
 MARKETPLACE_NAME="pixverse-private-beta"
 CLI_PACKAGE_NAME="pixverse-api"
-VERSION="0.3.0-beta.3"
+VERSION="0.3.0-beta.4"
 SCRIPT_PATH="${0:A}"
 SOURCE_ROOT="${SCRIPT_PATH:h}"
 SUPPORT_ROOT="$HOME/Library/Application Support/PixVerse/api-plugin"
@@ -305,7 +305,7 @@ if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("invent
 "$NODE_BIN" -e '
 const fs = require("node:fs");
 const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-if (manifest.name !== "pixverse-api" || manifest.version !== "0.3.0-beta.3") process.exit(1);
+if (manifest.name !== "pixverse-api" || manifest.version !== "0.3.0-beta.4") process.exit(1);
 ' "$SOURCE_ROOT/plugins/pixverse-api/.codex-plugin/plugin.json" || {
   echo "The PixVerse API Plugin manifest is invalid." >&2
   exit 1

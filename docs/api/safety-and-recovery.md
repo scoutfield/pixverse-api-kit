@@ -74,3 +74,7 @@ The handler validates authentication, reserves the nonce, and returns exact body
 - A duplicate that arrives while the first attempt is still being processed gets `409`, so PixVerse retries it later; if the first attempt fails, its reservation is released and the retry is delivered.
 
 `timestampToleranceSeconds` (an option of `createPlatformWebhookHandler` and `verifyPlatformWebhook`, 1 second to 7 days) bounds how old a `Webhook-Timestamp` may be. The default is 6 hours: the docs do not say whether retries are re-signed, and a short window could reject PixVerse's own late retries if they keep the original timestamp. Replays inside the window are still blocked by the nonce and `(id, status)` deduplication, which are held for the whole window. Timestamps more than 300 seconds in the future are always rejected. A custom store's `reserve(key, expiresAt, nowSeconds)` must return a falsy value only for a key that is already committed, and throw (for example an error with `statusCode: 409`) for one that is still reserved. For a multi-instance receiver, use a shared durable store.
+
+## Growth Studio November 2026 API update
+
+See [Growth Studio public workflows](growth-studio-workflows.md) for video imports, templates, Viral Clone, Video Variations, Product Image Suites, wallet discounts, and durable multi-resource recovery. New generation commands support credential-free dry runs and require `--confirm-billable` for a live create.

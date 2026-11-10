@@ -3,8 +3,8 @@ import path from "node:path";
 export const CUSTOMER_PLUGIN_RELEASE = Object.freeze({
   pluginName: "pixverse-api",
   marketplaceName: "pixverse-private-beta",
-  version: "0.3.0-beta.3",
-  archiveBaseName: "pixverse-api-plugin-0.3.0-beta.3",
+  version: "0.3.0-beta.4",
+  archiveBaseName: "pixverse-api-plugin-0.3.0-beta.4",
   sourceDateEpoch: 1_790_294_400,
 });
 
@@ -33,6 +33,8 @@ export const CUSTOMER_PLUGIN_ALLOWLIST = Object.freeze({
     "src/growth-studio/pdp.js",
     "src/growth-studio/validation.js",
     "src/growth-studio/wallet.js",
+    "src/growth-studio/workflows.js",
+    "src/growth-studio/workflow-jobs.js",
     "src/http.js",
     "src/jobs.js",
     "src/platform/cli.js",
@@ -62,6 +64,7 @@ export const CUSTOMER_PLUGIN_ALLOWLIST = Object.freeze({
   apiDocuments: Object.freeze([
     "docs/api/command-reference.md",
     "docs/api/growth-studio-pdp.md",
+    "docs/api/growth-studio-workflows.md",
     "docs/api/platform-operations.md",
     "docs/api/safety-and-recovery.md",
   ]),
@@ -79,6 +82,7 @@ export const CUSTOMER_PLUGIN_ALLOWLIST = Object.freeze({
   skillReferences: Object.freeze({
     "growth-studio": Object.freeze([
       "docs/api/growth-studio-pdp.md",
+      "docs/api/growth-studio-workflows.md",
       "docs/api/safety-and-recovery.md",
       "packaging/customer-plugin/plugin/examples/pdp-standard-high.json",
     ]),

@@ -35,7 +35,7 @@ test("packaging command builds and re-verifies the extracted Codex plugin", asyn
   const extractRoot = path.join(root, "extract");
   await fs.mkdir(extractRoot);
   await execFileAsync("unzip", ["-q", result.archivePath, "-d", extractRoot]);
-  const packageRoot = path.join(extractRoot, "pixverse-api-plugin-0.3.0-beta.3");
+  const packageRoot = path.join(extractRoot, "pixverse-api-plugin-0.3.0-beta.4");
   const pluginRoot = path.join(packageRoot, "plugins/pixverse-api");
   const wrapper = path.join(pluginRoot, "scripts/pixverse-api");
   const packageEntrypoint = path.join(packageRoot, "dist/index.js");
@@ -50,12 +50,12 @@ test("packaging command builds and re-verifies the extracted Codex plugin", asyn
   assert.equal((await verifyCustomerPlugin({ packageRoot })).status, "passed");
 
   const version = await execFileAsync(wrapper, ["--version"], processOptions);
-  assert.equal(version.stdout, "0.3.0-beta.3\n");
+  assert.equal(version.stdout, "0.3.0-beta.4\n");
   const entrypointVersion = await execFileAsync(packageEntrypoint, ["--version"], {
     ...processOptions,
     cwd: packageRoot,
   });
-  assert.equal(entrypointVersion.stdout, "0.3.0-beta.3\n");
+  assert.equal(entrypointVersion.stdout, "0.3.0-beta.4\n");
   const packageJson = JSON.parse(await fs.readFile(path.join(packageRoot, "package.json"), "utf8"));
   assert.deepEqual(packageJson.bin, { "pixverse-api": "./dist/index.js" });
 

@@ -35,7 +35,7 @@ test("customer plugin manifests use the approved identity and policy", async () 
   });
 
   assert.equal(plugin.name, "pixverse-api");
-  assert.equal(plugin.version, "0.3.0-beta.3");
+  assert.equal(plugin.version, "0.3.0-beta.4");
   assert.equal(plugin.skills, "./skills/");
   assert.equal(plugin.author.name, "PixVerse");
   assert.equal(plugin.interface.displayName, "PixVerse API Plugin");

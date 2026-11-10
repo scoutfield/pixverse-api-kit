@@ -34,6 +34,6 @@ Safety rules:
 Route to the provider skills for details:
 
 - `pixverse-platform-api` for Platform API operations, webhooks, artifacts, and recovery.
-- `pixverse-growth-studio-api` for Growth Studio PDP/product-detail-page videos, existing URL-based product-video jobs, folders, uploads, wallet reads, polling, and legacy aliases. PDP is merchant-neutral, but its current upstream scope is fashion/apparel.
+- `pixverse-growth-studio-api` for Growth Studio product/template videos, Viral Clone, Video Variations, Product Image Suites, imports, discounts, legacy PDP, polling, and durable recovery. PDP is merchant-neutral, but its current upstream scope is fashion/apparel.
 
 For PDP, keep the provider boundary explicit: use only `PIXVERSE_GROWTH_API_KEY`, dry-run the public payload first, obtain approval immediately before `--confirm-billable`, and recover from artifacts rather than resubmitting an ambiguous create.

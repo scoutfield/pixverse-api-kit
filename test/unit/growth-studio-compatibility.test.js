@@ -777,7 +777,7 @@ test("wallet pagination and arity reject before configuration", async () => {
     [["wallet", "ledgers", "--offset", "1.5"], /--offset must be/],
     [["wallet", "ledgers", "--offset", "1e2"], /--offset must be/],
     [["wallet", "ledgers", "--offset", "9007199254740992"], /--offset must be/],
-    [["wallet", "ledgers", "--limit", "0"], /--limit must be/],
+    [["wallet", "ledgers", "--limit", "-1"], /--limit must be/],
     [["wallet", "ledgers", "--limit", "101"], /--limit must be/],
     [["wallet", "ledgers", "--unknown", "1"], /Unknown wallet ledgers option/],
   ];

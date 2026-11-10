@@ -158,7 +158,7 @@ test("Claude Code upgrade refreshes an in-place marketplace and re-records the v
   const upgradeEnv = {
     ...env,
     FAKE_CLAUDE_MARKETPLACES: JSON.stringify([{ name: "pixverse-private-beta", path: installRoot }]),
-    FAKE_CLAUDE_INSTALL_JSON: JSON.stringify({ outcome: "ok", installedVersion: "0.3.0-beta.1", availableVersion: "0.3.0-beta.3" }),
+    FAKE_CLAUDE_INSTALL_JSON: JSON.stringify({ outcome: "ok", installedVersion: "0.3.0-beta.1", availableVersion: "0.3.0-beta.4" }),
   };
 
   const result = installAgents({ root: installRoot, agents: ["claude"], env: upgradeEnv, home });

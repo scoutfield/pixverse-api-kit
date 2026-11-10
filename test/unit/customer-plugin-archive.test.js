@@ -33,7 +33,7 @@ test("customer plugin archive is deterministic and has verifiable sidecars", asy
 
   const report = JSON.parse(await fs.readFile(first.reportPath, "utf8"));
   assert.equal(report.archive.sha256, first.archiveSha256);
-  assert.equal(report.release.version, "0.3.0-beta.3");
+  assert.equal(report.release.version, "0.3.0-beta.4");
   assert.equal(report.checks.every(({ status }) => status === "passed"), true);
 
   const checksum = await fs.readFile(first.checksumPath, "utf8");
@@ -42,7 +42,7 @@ test("customer plugin archive is deterministic and has verifiable sidecars", asy
   const extractRoot = path.join(root, "extracted");
   await fs.mkdir(extractRoot);
   await execFileAsync("unzip", ["-q", first.archivePath, "-d", extractRoot]);
-  const extractedPackage = path.join(extractRoot, "pixverse-api-plugin-0.3.0-beta.3");
+  const extractedPackage = path.join(extractRoot, "pixverse-api-plugin-0.3.0-beta.4");
   const manifest = await verifyManifest(extractedPackage);
   assert.equal(manifest.status, "passed");
   assert.equal(manifest.files.length > 0, true);

@@ -16,7 +16,7 @@ Begin with `pixverse-api --help` (or the plugin wrapper equivalent).
 ## Provider choice
 
 - Use the `platform` skill (`pixverse-api-platform` when installed standalone) for Platform API discovery, uploads, generation, editing, specialized agents, account reads, status, webhooks, and recovery.
-- Use the `growth-studio` skill (`pixverse-api-growth-studio` when installed standalone) for Growth Studio PDP product videos, uploads, wallet reads, general product-page video workflows, status, and recovery.
+- Use the `growth-studio` skill (`pixverse-api-growth-studio` when installed standalone) for Growth Studio product/template videos, Viral Clone, Video Variations, Product Image Suites, video imports, discounts, legacy PDP, status, and recovery.
 - Platform uses only `PIXVERSE_PLATFORM_API_KEY`.
 - Growth Studio uses only `PIXVERSE_GROWTH_API_KEY`.
 - Never substitute one provider's key, balance, identifiers, or approval for the other.

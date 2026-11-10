@@ -170,7 +170,7 @@ pixverse-api growth-studio wallet balance
 pixverse-api growth-studio wallet ledgers [--offset 0] [--limit 20]
 ```
 
-These calls are read-only. Balance is a snapshot, not a price quote, reservation, entitlement check, or substitute for billable approval. Ledger `offset` must be a non-negative integer and `limit` must be an integer from 1 through 100.
+These calls are read-only. Balance is a snapshot, not a price quote, reservation, entitlement check, or substitute for billable approval. Ledger `offset` must be a non-negative integer and `limit` must be an integer from 0 through 100; 0 selects the default of 20.
 
 ### Existing URL-based and general videos
 
@@ -248,3 +248,7 @@ There is no legacy alias for provider-qualified `resume`.
 ## Recovery rule
 
 After a timeout, connection loss, malformed response, or any other ambiguous billable submission, do not rerun the create command. Keep the job directory and use the matching provider's `resume` command; for PDP, use `growth-studio pdp resume`. With no saved result ID, stop at `reconciliation_required` and inspect ledger evidence instead of resubmitting. See [Safety and Recovery](safety-and-recovery.md) for the artifact and webhook contracts.
+
+## Growth Studio November 2026 API update
+
+See [Growth Studio public workflows](growth-studio-workflows.md) for video imports, templates, Viral Clone, Video Variations, Product Image Suites, wallet discounts, and durable multi-resource recovery. New generation commands support credential-free dry runs and require `--confirm-billable` for a live create.

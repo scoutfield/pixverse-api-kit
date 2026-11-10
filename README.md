@@ -26,7 +26,7 @@ npm run package:customer-plugin
 Open the generated archive:
 
 ```bash
-open dist/customer-plugin/0.3.0-beta.3/pixverse-api-plugin-0.3.0-beta.3.zip
+open dist/customer-plugin/0.3.0-beta.4/pixverse-api-plugin-0.3.0-beta.4.zip
 ```
 
 Then double-click `install.command` inside the extracted folder. If macOS blocks it, Control-click `install.command`, choose **Open**, and confirm.
@@ -128,10 +128,10 @@ For live/billable jobs, use `run-job` or the provider-specific create command wi
 
 ## Customer package contents
 
-The package artifacts are written to `dist/customer-plugin/0.3.0-beta.3/`:
+The package artifacts are written to `dist/customer-plugin/0.3.0-beta.4/`:
 
-- `pixverse-api-plugin-0.3.0-beta.3.zip`
-- `pixverse-api-plugin-0.3.0-beta.3.zip.sha256`
+- `pixverse-api-plugin-0.3.0-beta.4.zip`
+- `pixverse-api-plugin-0.3.0-beta.4.zip.sha256`
 - `release-report.json`
 
 The build requires Node.js 20+, npm, `zip`, and `unzip`. It stages only approved CLI, API documentation, plugin, and production dependency files; validates the extracted archive; and never reads API credentials or sends paid PixVerse requests. The archive includes double-click macOS install and uninstall helpers plus command-line fallback instructions.
@@ -322,3 +322,7 @@ PIXVERSE_API_SKIP_PIXVERSE_PREFIX=1 zsh ./install.command
 ## Job Artifacts
 
 Platform `run-job` writes under `pixverse-api-jobs/platform/` by default. Platform default waiting writes polling snapshots and `final.json`; Platform `--no-wait` writes the accepted request and known ID for later `resume`. Growth Studio `run-job` and live PDP create write under `jobs/` by default. Both providers preserve redacted request evidence, known IDs, polling snapshots, final state, and safe error records. PDP can additionally preserve `ledger-source-id.json`. Use the matching provider or PDP `resume` command with that job directory to continue polling without submitting another generation.
+
+## Growth Studio November 2026 API update
+
+See [Growth Studio public workflows](docs/api/growth-studio-workflows.md) for video imports, templates, Viral Clone, Video Variations, Product Image Suites, wallet discounts, and durable multi-resource recovery. New generation commands support credential-free dry runs and require `--confirm-billable` for a live create.

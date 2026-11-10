@@ -15,7 +15,7 @@ import {
 } from "./credentials.js";
 
 const LEGACY_WARNING = 'Warning: legacy command syntax is deprecated; use the "pixverse-api growth-studio" namespace.\n';
-export const CLI_VERSION = "0.3.0-beta.3";
+export const CLI_VERSION = "0.3.0-beta.4";
 
 export async function main(argv = [], context = {}) {
   const stdout = context.stdout ?? process.stdout;
@@ -115,9 +115,11 @@ function loadPlatformDotEnv(filePath) {
 
 async function runDefaultGrowthStudioCommand(args, context) {
   if (context.env === process.env) {
-    loadUserCredentials(process.env);
     const { loadDotEnv } = await import("./growth-studio/config.js");
-    loadDotEnv(path.join(context.cwd, ".env"));
+    context = { ...context, loadGrowthCredentials: () => {
+      loadUserCredentials(process.env);
+      loadDotEnv(path.join(context.cwd, ".env"));
+    } };
   }
   const { runGrowthStudioCommand } = await import("./growth-studio/cli.js");
   return runGrowthStudioCommand(args, context);

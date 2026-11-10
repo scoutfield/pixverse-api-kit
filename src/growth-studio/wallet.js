@@ -34,6 +34,6 @@ export function normalizeWalletLedgerOptions(options = {}) {
   assertKnownOptionFields(options);
   return {
     offset: readInteger(options.offset ?? 0, "offset", { minimum: 0 }),
-    limit: readInteger(options.limit ?? 20, "limit", { minimum: 1, maximum: 100 }),
+    limit: readInteger(options.limit ?? 20, "limit", { minimum: 0, maximum: 100 }) || 20,
   };
 }
