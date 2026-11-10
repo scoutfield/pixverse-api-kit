@@ -32,6 +32,7 @@ export const CUSTOMER_PLUGIN_ALLOWLIST = Object.freeze({
     "src/growth-studio/jobs.js",
     "src/growth-studio/pdp.js",
     "src/growth-studio/validation.js",
+    "src/growth-studio/viral-clone.js",
     "src/growth-studio/wallet.js",
     "src/growth-studio/workflows.js",
     "src/growth-studio/workflow-jobs.js",
@@ -63,8 +64,10 @@ export const CUSTOMER_PLUGIN_ALLOWLIST = Object.freeze({
   ]),
   apiDocuments: Object.freeze([
     "docs/api/command-reference.md",
+    "docs/api/growth-studio-overview.md",
     "docs/api/growth-studio-pdp.md",
     "docs/api/growth-studio-workflows.md",
+    "docs/api/growth-studio-viral-clone.md",
     "docs/api/platform-operations.md",
     "docs/api/safety-and-recovery.md",
   ]),
@@ -81,10 +84,14 @@ export const CUSTOMER_PLUGIN_ALLOWLIST = Object.freeze({
   ]),
   skillReferences: Object.freeze({
     "growth-studio": Object.freeze([
+      "docs/api/command-reference.md",
+      "docs/api/growth-studio-overview.md",
       "docs/api/growth-studio-pdp.md",
       "docs/api/growth-studio-workflows.md",
+      "docs/api/growth-studio-viral-clone.md",
       "docs/api/safety-and-recovery.md",
       "packaging/customer-plugin/plugin/examples/pdp-standard-high.json",
+      "packaging/customer-plugin/plugin/examples/viral-clone-plus.json",
     ]),
     platform: Object.freeze([
       "docs/api/command-reference.md",

@@ -10,7 +10,7 @@
 
 ## Durable Jobs
 
-Use the durable submission surface for billable work: Platform `run-job`, Growth Studio `run-job`, or Growth Studio `pdp create --confirm-billable`. Each writes a durable, redacted request artifact before submission. Platform billable jobs wait by default; use `--no-wait` only when asynchronous return is required, then resume from the saved job directory. A new Platform job gets a fresh UUID `Ai-trace-id`; recovery may reuse only the saved trace from `request.json`. Growth Studio stores its own trace and never borrows Platform credentials or identifiers.
+Use the durable submission surface for billable work: Platform `run-job`, Growth Studio `run-job`, or Growth Studio `pdp create --confirm-billable` / `viral-clone create --confirm-billable`. Each writes a durable, redacted request artifact before submission. Platform billable jobs wait by default; use `--no-wait` only when asynchronous return is required, then resume from the saved job directory. A new Platform job gets a fresh UUID `Ai-trace-id`; recovery may reuse only the saved trace from `request.json`. Growth Studio stores its own trace and never borrows Platform credentials or identifiers.
 
 Depending on the provider and how far the job reached, its directory can contain:
 
@@ -18,6 +18,7 @@ Depending on the provider and how far the job reached, its directory can contain
 - `folder.json` when Growth Studio folder resolution was used
 - `create-response.json`
 - `video-id.json` or `image-id.json`
+- `run-id.json` for a Growth Studio Viral Clone job
 - `ledger-source-id.json` for a PDP job when the API returns `ledger_source_id`
 - `polling.jsonl`
 - `final.json`
@@ -31,6 +32,7 @@ Resume with the matching provider:
 pixverse-api platform resume /absolute/path/pixverse-api-jobs/platform/<job-dir>
 pixverse-api growth-studio resume /absolute/path/jobs/<job-dir>
 pixverse-api growth-studio pdp resume /absolute/path/jobs/<job-dir>
+pixverse-api growth-studio viral-clone resume /absolute/path/jobs/<job-dir>
 ```
 
 ### Polling defaults and transient read errors
@@ -56,6 +58,10 @@ pixverse-api growth-studio wallet ledgers --offset 0 --limit 20
 Match a ledger item with `source_type: "video"` and a string `source_id` equal to the saved string `ledger_source_id` or `video_id`. No matching item is not proof of failure: a generation can be free, or ledger visibility can be delayed. A `403` from PDP or wallet calls normally indicates missing account or key entitlement; resolve access rather than retrying a billable create.
 
 See [Growth Studio PDP Videos](growth-studio-pdp.md) for its seller-neutral fashion/apparel payload and full workflow.
+
+## Growth Studio Viral Clone and Video Import
+
+Viral Clone create follows the PDP rules: credential-free `--dry-run`, explicit approval immediately before `--confirm-billable`, one submission, no automatic retry. Recovery uses the saved string `run_id` (`run-id.json`) with `growth-studio viral-clone resume`; without it, the result is `reconciliation_required`. `growth-studio video import-url` is free but is also sent once and never retried, because a lost response may already have created an uploaded asset. See [Growth Studio Viral Clone](growth-studio-viral-clone.md).
 
 ## Webhooks
 

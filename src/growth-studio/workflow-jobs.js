@@ -44,10 +44,12 @@ function resources(name, body) {
 
 async function failure(jobDir, error) {
   const safe = serializeError(error);
-  await write(jobDir, `error-${randomUUID()}.json`, {
+  const record = {
     ...safe, message: "Growth Studio request interrupted. Resume saved IDs; never repeat creation automatically.",
     job_dir: jobDir,
-  });
+  };
+  await write(jobDir, `error-${randomUUID()}.json`, record);
+  await write(jobDir, "error.json", record);
   // Return the durable recovery location even when the submission outcome is unknown.
   error.details = { ...error.details, job_dir: jobDir, recovery: "resume; reconcile if no resource IDs were saved" };
 }
@@ -67,6 +69,7 @@ export async function runWorkflowJob(client, name, payload, options = {}) {
     await write(jobDir, "create-response.json", result.body);
     const ids = resources(name, result.body);
     await write(jobDir, "resource-ids.json", ids);
+    if (name === "viral-clone") await write(jobDir, "run-id.json", ids[0]);
     if (result.body.ledger_source_id !== undefined) {
       assertResourceId(result.body.ledger_source_id, "ledger_source_id");
       await write(jobDir, "ledger-source-id.json", { ledger_source_id: result.body.ledger_source_id });
@@ -93,9 +96,18 @@ export async function resumeWorkflowJob(getClient, name, directory, options = {}
   // Validate all persisted IDs before loading credentials or making any query.
   resources(name, workflowSpec(name).batch ? { videos: ids } : ids[0]);
   const final = await optional(jobDir, "final.json");
-  if (final) return { job_dir: jobDir, workflow: name, ...final };
+  if (final) return workflowResult(jobDir, name, final);
   try { return await pollSaved(getClient(), jobDir, name, ids, { ...options, traceId: request.trace_id }); }
   catch (error) { await failure(jobDir, error); throw error; }
+}
+
+function workflowResult(jobDir, name, body) {
+  const output = name === "viral-clone" ? {
+    video_url: body.output?.video_url,
+    thumbnail_url: body.output?.thumbnail_url,
+    mime_type: body.output?.mime_type,
+  } : {};
+  return { job_dir: jobDir, workflow: name, ...output, ...body };
 }
 
 async function pollSaved(client, jobDir, name, ids, options) {
@@ -120,5 +132,5 @@ async function pollSaved(client, jobDir, name, ids, options) {
   // A completed batch is settled, not necessarily successful. Keep each status/error.
   const final = spec.batch ? { status: "completed", videos: results, ...ledger } : { ...results[0], ...ledger };
   await write(jobDir, "final.json", final);
-  return { job_dir: jobDir, workflow: name, ...final };
+  return workflowResult(jobDir, name, final);
 }

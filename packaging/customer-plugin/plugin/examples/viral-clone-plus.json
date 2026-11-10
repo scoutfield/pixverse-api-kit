@@ -1,0 +1,27 @@
+{
+  "source_video_id": "627410861853514292",
+  "model": "plus",
+  "script_language": "en-US",
+  "listing": {
+    "title": "Example Travel Mug",
+    "description": "Insulated stainless steel mug that keeps drinks hot for hours.",
+    "brand": "Example Brand",
+    "image_info": {
+      "items": [
+        {
+          "url": "https://media.pixverse.ai/example/travel-mug-front.webp",
+          "sort": 0
+        }
+      ]
+    }
+  },
+  "video": {
+    "aspect_ratio": "9:16",
+    "resolution": "720p",
+    "language": "en-US",
+    "bgm_mode": "model_direct"
+  },
+  "avatar": {
+    "mode": "disabled"
+  }
+}

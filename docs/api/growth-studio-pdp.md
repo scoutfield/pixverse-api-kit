@@ -1,5 +1,7 @@
 # Growth Studio PDP Videos
 
+For every Growth Studio route, workflow comparison, and billing rules, start at the [Growth Studio Overview](growth-studio-overview.md).
+
 PDP creates a product-detail-page video from uploaded fashion or apparel product images. The public payload and CLI are generic across products from any seller or merchant; no seller-specific schema, domain, folder, or prompt is required. Merchant neutrality does not expand the currently documented fashion/apparel category boundary.
 
 The existing URL-based Growth Studio video workflow remains separate. Use `growth-studio video create-from-url` or `growth-studio run-job` for that workflow; PDP does not accept or scrape a product-page URL.

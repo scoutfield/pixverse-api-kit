@@ -7,10 +7,18 @@ import {
   validateEditPayload,
   validateFolderPayload,
   validateListVideosOptions,
+  normalizeImageListOptions,
 } from "./validation.js";
 import { PDP_CREATE_ROUTE, normalizePdpPayload } from "./pdp.js";
 import { normalizeWalletLedgerOptions } from "./wallet.js";
 import { workflowSpec, assertResourceId, normalizeWorkflowPayload } from "./workflows.js";
+import {
+  VIDEO_IMPORT_ROUTE,
+  VIRAL_CLONE_CREATE_ROUTE,
+  assertRunId,
+  normalizeViralClonePayload,
+  validateVideoImportUrl,
+} from "./viral-clone.js";
 
 export {
   validateCreatePayload,
@@ -26,9 +34,19 @@ export {
   validatePdpPayload,
 } from "./pdp.js";
 export { normalizeWalletLedgerOptions } from "./wallet.js";
+export {
+  VIDEO_IMPORT_PATH,
+  VIRAL_CLONE_CREATE_PATH,
+  assertRunId,
+  describeViralCloneDryRun,
+  normalizeViralClonePayload,
+  validateViralClonePayload,
+  validateVideoImportUrl,
+} from "./viral-clone.js";
 
 const API_PREFIX = "/openapi/v1";
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "canceled"]);
+const VIRAL_CLONE_TERMINAL_STATUSES = new Set(["succeeded", "failed"]);
 const DEFAULT_RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 const JSON_BIG = JSONBigFactory({
   storeAsString: true,
@@ -226,6 +244,75 @@ export class GrowthStudioClient {
       json: normalizePdpPayload(payload),
       traceId: options.traceId,
     });
+  }
+
+  // Free, synchronous import of a public direct MP4 URL. Like every POST it is a
+  // single attempt: the endpoint has no idempotency key, so a retry after a lost
+  // response could create a duplicate uploaded asset.
+  async importVideoFromUrl(url, options = {}) {
+    validateVideoImportUrl(url);
+    return this.request("POST", VIDEO_IMPORT_ROUTE, {
+      json: { url },
+      traceId: options.traceId,
+    });
+  }
+
+  async createViralCloneRun(payload, options = {}) {
+    return this.request("POST", VIRAL_CLONE_CREATE_ROUTE, {
+      json: normalizeViralClonePayload(payload),
+      traceId: options.traceId,
+    });
+  }
+
+  async getViralCloneRun(runId, options = {}) {
+    assertRunId(runId);
+    return this.request("GET", `${VIRAL_CLONE_CREATE_ROUTE}/${encodeURIComponent(runId)}`, {
+      traceId: options.traceId,
+    });
+  }
+
+  async pollViralCloneRun(runId, options = {}) {
+    assertRunId(runId);
+    const timeoutMs = options.timeoutMs ?? 30 * 60 * 1000;
+    const startedAt = this.now();
+    const fallbackDelaySeconds = Math.max(
+      MIN_FALLBACK_POLL_DELAY_SECONDS,
+      options.fallbackDelaySeconds ?? 5,
+    );
+    let waitSeconds = Math.max(MIN_INITIAL_POLL_DELAY_SECONDS, options.initialDelaySeconds ?? 5);
+
+    while (true) {
+      await this.sleep(waitSeconds * 1000);
+
+      let result;
+      try {
+        result = await this.getViralCloneRun(runId, { traceId: options.traceId });
+      } catch (error) {
+        if (!isRetryableReadError(error) || this.now() - startedAt > timeoutMs) throw error;
+        waitSeconds = Math.max(MIN_FALLBACK_POLL_DELAY_SECONDS, error.retryAfter ?? fallbackDelaySeconds);
+        continue;
+      }
+      const body = result.body;
+      await options.onSnapshot?.(body);
+      if (VIRAL_CLONE_TERMINAL_STATUSES.has(body.status)) return body;
+
+      if (this.now() - startedAt > timeoutMs) {
+        throw new Error(`Polling timed out for run_id ${runId}.`);
+      }
+      waitSeconds = Math.max(MIN_FALLBACK_POLL_DELAY_SECONDS, result.retryAfter ?? fallbackDelaySeconds);
+    }
+  }
+
+  // Undocumented, observed live 2026-10-23: model catalog. Passed through unchanged;
+  // its price units (price_unit, credit_rate_micro) are not explained by PixVerse.
+  async listModels(options = {}) {
+    return this.request("GET", "/models", { traceId: options.traceId });
+  }
+
+  // Undocumented, observed live 2026-10-23: generated images with offset pagination.
+  async listImages(options = {}) {
+    const query = normalizeImageListOptions(options);
+    return this.request("GET", "/images", { query, traceId: options.traceId });
   }
 
   async getWalletBalance(options = {}) {

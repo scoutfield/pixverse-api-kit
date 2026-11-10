@@ -129,3 +129,28 @@ test("synchronous imports submit once, never poll, and redact signed URL credent
   assert.equal((await fs.stat(path.join(result.job_dir, "request.json"))).mode & 0o777, 0o600);
   assert.equal((await resumeWorkflowJob(noClient, "video-import", result.job_dir)).video_id, "123");
 });
+
+
+test("generic resume follows current resource IDs without resubmitting and stays credential-free when IDs are missing", async (t) => {
+  const root = await temp(t);
+  let creates = 0;
+  let polls = 0;
+  const client = {
+    async createWorkflow() { creates++; return { body: { run_id: "42", status: "processing" } }; },
+    async pollWorkflow(name, id) {
+      polls++; assert.equal(name, "viral-clone"); assert.equal(id, "42");
+      return { run_id: id, status: "succeeded", output: { video_url: "https://media.pixverse.ai/result.mp4" } };
+    },
+  };
+  const accepted = await runWorkflowJob(client, "viral-clone", payloads()["viral-clone"], { jobsDir: root, poll: false });
+  const result = await runGrowthStudioCommand(["resume", accepted.job_dir], { client });
+  assert.equal(result.status, "succeeded");
+  assert.equal(result.video_url, result.output.video_url);
+  assert.equal(creates, 1);
+  assert.equal(polls, 1);
+  assert.deepEqual(await runGrowthStudioCommand(["resume", accepted.job_dir], { get client() { return noClient(); } }), result);
+  await fs.rm(path.join(accepted.job_dir, "resource-ids.json"));
+  await fs.rm(path.join(accepted.job_dir, "run-id.json"));
+  const missing = await runGrowthStudioCommand(["resume", accepted.job_dir], { get client() { return noClient(); } });
+  assert.equal(missing.status, "reconciliation_required");
+});
